@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube Search Results</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="navbar-title">
+            <a href="/" style="color: white; text-decoration: none;">Video Processing App</a>
+        </div>
+        <div class="navbar-links">
+            <% if (user) { %>
+                <a href="/logout">Logout</a>
+            <% } else { %>
+                <a href="/login">Login</a>
+                <a href="/register">Register</a>
+            <% } %>
+        </div>
+    </nav>
+
+    <div class="content-wrapper">
+        <h2>YouTube Search Results for "<%= query %>"</h2>
+        <ul>
+            <% videos.forEach(video => { %>
+                <li>
+                    <img src="<%= video.thumbnail %>" alt="Thumbnail">
+                    <h3><a href="https://www.youtube.com/watch?v=<%= video.videoId %>"><%= video.title %></a></h3>
+                    <p><%= video.description %></p>
+                </li>
+            <% }) %>
+        </ul>
+    </div>
+
+    <footer class="footer">
+        Video Processing App © 2024
+    </footer>
+</body>
+</html>

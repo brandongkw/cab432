@@ -1,0 +1,17 @@
+config:
+  target: 'http://localhost:3000'
+  phases:
+    - duration: 60
+      arrivalRate: 5
+scenarios:
+  - flow:
+      - post:
+          url: "/upload"
+          formData:
+            videoFile: "C:/Users/brand/OneDrive/Desktop/My Projects/video-processing-app/videos/test_video.mp4"
+      - post:
+          url: "/process"
+          json:
+            video: "sample-video.mp4"
+            format: "mp4"
+            resolution: "1080p"

@@ -1,0 +1,301 @@
+/* General body styling */
+body {
+    font-family: 'Roboto', sans-serif;
+    background-color: #f9f0e8; /* Soft warm background */
+    color: #3d3d3d; /* Darker text for readability */
+    margin: 0;
+    padding: 0;
+    padding-top: 70px;
+}
+
+/* Header Styling */
+h1 {
+    color: #ff6b6b; /* Warm sunset color */
+    font-size: 3em;
+    margin-top: 20px;
+}
+
+/* Content Wrapper */
+.content-wrapper {
+    display: grid;
+    grid-template-columns: 1fr 2fr 1fr;
+    grid-template-rows: auto auto;
+    grid-gap: 20px;
+    padding: 20px 40px;
+    padding-top: 100px; /* Adjust the top padding to make space for the fixed navbar */
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* Form Styling */
+form {
+    margin: 20px;
+    padding: 20px;
+    background: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    max-width: 100%; /* Ensure form doesn't take up too much space */
+}
+
+/* File Upload and Button Styling */
+input[type="file"] {
+    display: none;
+}
+
+/* Style for the YouTube search area */
+.youtube-search-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 10px;
+    background-color: #f9f0e8;
+    border-radius: 10px;
+    margin-top: 20px;
+}
+
+/* Adjust the search input and button */
+.youtube-search-container input[type="text"] {
+    width: 300px;
+    padding: 10px;
+    margin-right: 10px;
+    border: 1px solid #ced4da;
+    border-radius: 5px;
+    box-sizing: border-box;
+    background-color: #ffffff;
+}
+
+.youtube-search-container button {
+    padding: 10px 20px;
+    background-color: #FF7F7F;
+    color: white;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.youtube-search-container button:hover {
+    background-color: #ff5a4c;
+}
+
+/* Custom file upload button */
+.custom-file-upload, button {
+    display: inline-block;
+    padding: 10px 20px;
+    background-color: #FF7F7F;
+    color: white;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+    text-align: center;
+    margin-right: 10px;
+    width: 100%;
+    max-width: 150px;
+}
+
+.file-upload-wrapper {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+/* Styling the displayed file name */
+.file-name {
+    margin-top: 10px;
+    font-style: italic;
+    color: #555;
+}
+
+/* Video Styles */
+#video-placeholder {
+    grid-column: 2 / span 1;
+    grid-row: 1 / span 2;
+    width: 100%;
+    height: auto;
+    border: 1px solid #f76c6c;
+    border-radius: 10px;
+    overflow: hidden;
+}
+
+video {
+    border: 2px solid #ff6b6b;
+    border-radius: 10px;
+    width: 100%;
+}
+
+/* Navbar Styling */
+.navbar {
+    background-color: #FF7F7F;
+    padding: 15px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    width: 100%;
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1000;
+    box-sizing: border-box;
+}
+
+.navbar-title {
+    color: white;
+    font-size: 24px;
+    font-weight: bold;
+}
+
+.navbar-links a {
+    color: white;
+    text-decoration: none;
+    margin-left: 20px;
+    font-size: 18px;
+}
+
+.navbar-links a:hover {
+    text-decoration: underline;
+}
+
+/* Adjust the conversion container */
+.conversion-container {
+    grid-column: 3 / span 1;
+    grid-row: 1 / span 1;
+    background-color: #fff;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.conversion-container h3 {
+    margin-bottom: 15px;
+    color: #343a40;
+}
+
+.conversion-container label {
+    display: block;
+    margin: 10px 0 5px;
+    color: #495057;
+}
+
+.conversion-container select {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ced4da;
+    border-radius: 5px;
+    box-sizing: border-box;
+    margin-bottom: 15px;
+}
+
+.conversion-container button {
+    width: 100%;
+    padding: 10px;
+    background-color: #ff6f61;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.conversion-container button:hover {
+    background-color: #ff5a4c;
+}
+
+/* Global adjustments for padding and margin to bring elements closer */
+h2, h3, .file-upload, .conversion-container {
+    margin-bottom: 15px;
+}
+
+/* Uploaded Videos */
+.uploaded-videos-container {
+    grid-column: 1 / span 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    background-color: #ffffff;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Authentication page styling */
+.auth-container {
+    background-color: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    padding: 40px;
+    max-width: 400px;
+    width: 100%;
+    margin: 50px auto;
+}
+
+.auth-container h2 {
+    margin-bottom: 20px;
+    color: #343a40;
+    text-align: center;
+}
+
+.auth-container input[type="text"],
+.auth-container input[type="password"] {
+    width: 100%;
+    padding: 10px;
+    margin: 10px 0;
+    border: 1px solid #ced4da;
+    border-radius: 5px;
+    box-sizing: border-box;
+}
+
+.auth-container button {
+    width: 100%;
+    padding: 10px;
+    background-color: #ff6f61;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+.auth-container button:hover {
+    background-color: #ff5a4c;
+}
+
+.auth-container .links {
+    margin-top: 10px;
+    text-align: center;
+}
+
+.auth-container .links a {
+    color: #007bff;
+    text-decoration: none;
+}
+
+.auth-container .links a:hover {
+    text-decoration: underline;
+}
+
+.progress-bar {
+    width: 100%;
+    background-color: #f3f3f3;
+    border-radius: 25px;
+    margin: 20px 0;
+    height: 25px;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    width: 0;
+    background-color: #4caf50;
+    border-radius: 25px;
+    transition: width 0.5s;
+}
+
+/* Footer Styles */
+footer {
+    background-color: #f76c6c;
+    color: white;
+    text-align: center;
+    padding: 10px 0;
+    width: 100%;
+}

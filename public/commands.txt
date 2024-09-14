@@ -1,0 +1,11 @@
+Use scp to transfer only the updated files or the entire project directory to the EC2 instance.
+- do this not connected to ssh ec2
+scp -i "C:\Users\brand\OneDrive - Queensland University of Technology\QUT Docs\Year 3 Sem 2 2024\CAB432 - Cloud Computing\Week 1 - Intro to cloud\ec2keypair" path/to/your/updated/index.js ubuntu@13.211.153.58:/home/ubuntu/video-processing-app/
+
+
+To connect to ec2 instance:
+ssh -i "C:\Users\brand\OneDrive - Queensland University of Technology\QUT Docs\Year 3 Sem 2 2024\CAB432 - Cloud Computing\Week 1 - Intro to cloud\ec2keypair" ubuntu@13.211.153.58
+
+Rebuild Docker image
+sudo docker build -t video-processing-app .
+sudo docker run -d -p 80:3000 video-processing-app

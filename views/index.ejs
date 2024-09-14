@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Processing App</title>
+    <link rel="stylesheet" href="/styles.css">
+</head>
+
+<body>
+    <nav class="navbar">
+        <div class="navbar-title">
+            <a href="/" style="color: white; text-decoration: none;">Video Processing App</a>
+        </div>
+        <div class="navbar-links">
+            <% if (user) { %>
+                <a href="/logout">Logout</a>
+            <% } else { %>
+                <a href="/login">Login</a>
+                <a href="/register">Register</a>
+            <% } %>
+        </div>
+    </nav>
+    <div class="youtube-search-container">
+        <form action="/search" method="GET">
+            <input type="text" name="q" placeholder="Search YouTube" required>
+            <button type="submit">Search</button>
+        </form>
+    </div>
+    <div class="content-wrapper">
+        <div class="file-upload-wrapper">
+            <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
+                <label class="custom-file-upload">
+                    <input type="file" name="videoFile" accept="video/*" required
+                        onchange="document.getElementById('file-chosen').textContent = this.files[0].name" />
+                    Choose File
+                </label>
+                <span id="file-chosen">No file chosen</span>
+                <button type="submit">Upload Video</button>
+            </form>
+        </div>
+
+        <div class="video-display-wrapper">
+            <h2>Uploaded Video:</h2>
+            <video id="videoPlayer" controls>
+                <source id="videoSource" src="/videos/<%= video %>" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+
+        <div class="conversion-container">
+            <h3>Convert to:</h3>
+            <form action="/process" method="POST">
+                <input type="hidden" name="video" value="<%= video %>">
+                <label for="format">Format:</label>
+                <select name="format" id="format">
+                    <option value="mp4">MP4</option>
+                    <option value="avi">AVI</option>
+                    <option value="mov">MOV</option>
+                </select>
+                <label for="resolution">Resolution:</label>
+                <select name="resolution" id="resolution">
+                    <option value="1080p">1080p</option>
+                    <option value="720p">720p</option>
+                    <option value="480p">480p</option>
+                </select>
+                <button type="submit">Convert Video</button>
+            </form>
+        </div>
+    </div>
+    <script>
+        const fileInput = document.getElementById('fileInput');
+        const fileName = document.getElementById('fileName');
+        const uploadButton = document.getElementById('uploadButton');
+        const videoPlayer = document.getElementById('videoPlayer');
+        const videoSource = document.getElementById('videoSource');
+
+        fileInput.addEventListener('change', () => {
+            fileName.textContent = fileInput.files[0].name;
+        });
+
+        uploadButton.addEventListener('click', () => {
+            const formData = new FormData();
+            formData.append('videoFile', fileInput.files[0]);
+
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    videoSource.src = `/videos/${data.filename}`;
+                    videoPlayer.load();
+                })
+                .catch(error => console.error('Error uploading video:', error));
+        });
+
+        document.getElementById('convertForm').addEventListener('submit', function (event) {
+            event.preventDefault();
+
+            const formData = new FormData(this);
+            formData.append('video', fileName.textContent);
+
+            fetch('/process', {
+                method: 'POST',
+                body: formData
+            })
+                .then(response => response.json())
+                .then(data => {
+                    window.location.href = `/download/${data.filename}`;
+                })
+                .catch(error => console.error('Error processing video:', error));
+        });
+    </script>
+
+    <h2>Your Uploaded Videos</h2>
+    <ul id="video-list"></ul>
+
+    <div class="progress-bar">
+        <div class="progress-bar-fill" id="progress-bar-fill"></div>
+    </div>
+
+    <script>
+        // Fetch and display videos
+        fetch('/api/videos')
+            .then(response => response.json())
+            .then(videos => {
+                const videoList = document.getElementById('video-list');
+                videos.forEach(video => {
+                    const li = document.createElement('li');
+                    li.textContent = video.filename;
+                    videoList.appendChild(li);
+
+                    // Add delete button
+                    const deleteButton = document.createElement('button');
+                    deleteButton.textContent = 'Delete';
+                    deleteButton.onclick = () => deleteVideo(video._id);  // Using _id
+                    li.appendChild(deleteButton);
+                });
+            });
+
+        function deleteVideo(id) {
+            fetch(`/api/videos/${id}`, { method: 'DELETE' })  // Using _id
+                .then(response => {
+                    if (response.ok) {
+                        alert('Video deleted');
+                    } else {
+                        alert('Failed to delete video');
+                    }
+                    location.reload();
+                })
+                .catch(error => console.error('Error deleting video:', error));
+        }
+
+        function checkStatus(id) {
+            fetch(`/api/videos/${id}/status`)  // Using _id
+                .then(response => response.json())
+                .then(data => alert(`Status: ${data.status}`));
+        }
+
+        const progressBarFill = document.getElementById('progress-bar-fill');
+
+        // Setup WebSocket connection
+        const ws = new WebSocket('ws://localhost:3000');
+
+        ws.onmessage = function(event) {
+            const data = JSON.parse(event.data);
+            if (data.progress !== undefined) {
+                progressBarFill.style.width = data.progress + '%';
+            }
+        };
+    </script>
+
+    <footer class="footer">
+        Video Processing App © 2024
+    </footer>
+</body>
+
+</html>
