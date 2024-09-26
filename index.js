@@ -1,3 +1,5 @@
+// Testing to push to repo
+
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
@@ -68,11 +70,11 @@ function isAuthenticated(req, res, next) {
 
 // Connect to MongoDB
 mongoose.connect(process.env.DATABASE_URL, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
+    useNewUrlParser: true,
+    useUnifiedTopology: true,
 })
-.then(() => console.log('MongoDB connected'))
-.catch((err) => console.error('MongoDB connection error:', err));
+    .then(() => console.log('MongoDB connected'))
+    .catch((err) => console.error('MongoDB connection error:', err));
 
 // Middleware
 app.use(express.static('public'));
@@ -119,10 +121,10 @@ passport.deserializeUser(async (id, done) => {
 
 // Routes for user authentication
 app.get('/', isAuthenticated, (req, res) => {
-    res.render('index', { 
-        video: null, 
-        preview: null, 
-        msg: '', 
+    res.render('index', {
+        video: null,
+        preview: null,
+        msg: '',
         user: req.user || null
     });
 });
@@ -199,10 +201,10 @@ app.post('/upload', isAuthenticated, (req, res) => {
                 filename: req.file.filename,
                 UserId: req.user.id,
             });
-            res.render('index', { 
-                video: req.file.filename, 
-                preview: null, 
-                msg: 'Video uploaded successfully', 
+            res.render('index', {
+                video: req.file.filename,
+                preview: null,
+                msg: 'Video uploaded successfully',
                 user: req.user  // Pass the user object
             });
         } catch (error) {
@@ -221,7 +223,7 @@ app.post('/process', isAuthenticated, (req, res) => {
     }
 
     const output = `./videos/processed-${Date.now()}.${format}`;
-    
+
     let scaleOption;
     switch (resolution) {
         case '1080p':
