@@ -13,28 +13,41 @@ const LocalStrategy = require('passport-local').Strategy;
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const flash = require('connect-flash');
-const mongoose = require('mongoose');
+// const mongoose = require('mongoose');
 const WebSocket = require('ws');
 const User = require('./models/user');
 const Video = require('./models/video');
+const axios = require('axios');
+const AWS = require('aws-sdk');
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand } = require("@aws-sdk/lib-dynamodb");
+
 const app = express();
 const port = process.env.PORT || 3000;
-const axios = require('axios');
-
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// Create an HTTP server using the express app
+// AWS SDK Configuration for S3
+AWS.config.update({
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    region: process.env.AWS_REGION,
+});
+const s3 = new S3Client({ region: process.env.REGION });
+const dynamoDB = new AWS.DynamoDB.DocumentClient();
+
+// Create HTTP server using the express app
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ noServer: true });
 
-// Handle WebSocket connection
+// Handle WebSocket connections for live progress tracking
 wss.on('connection', (ws) => {
     console.log('WebSocket connected');
     ws.on('message', (message) => {
-        console.log('received:', message);
+        console.log('Received:', message);
     });
 
-    // Send progress updates to the client
+    // Example progress simulation
     ws.send(JSON.stringify({ progress: 0 }));
     let progress = 0;
     const interval = setInterval(() => {
@@ -69,21 +82,20 @@ function isAuthenticated(req, res, next) {
 }
 
 // Connect to MongoDB
-mongoose.connect(process.env.DATABASE_URL, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
-    .then(() => console.log('MongoDB connected'))
-    .catch((err) => console.error('MongoDB connection error:', err));
+// mongoose.connect(process.env.DATABASE_URL, {
+//   useNewUrlParser: true,
+//   useUnifiedTopology: true,
+// })
+// .then(() => console.log('MongoDB connected'))
+// .catch((err) => console.error('MongoDB connection error:', err));
 
-// Middleware
+// Middleware Setup
 app.use(express.static('public'));
 app.use(express.urlencoded({ extended: true }));
-app.use('/videos', express.static(path.join(__dirname, 'videos')));
 app.use(session({
     secret: process.env.SECRET_KEY,
     resave: false,
-    saveUninitialized: false,
+    saveUninitialized: true,
     cookie: { secure: false }
 }));
 app.use(passport.initialize());
@@ -93,10 +105,18 @@ app.use(flash());
 // View engine setup
 app.set('view engine', 'ejs');
 
-// Passport authentication strategy
+// Passport authentication configuration
 passport.use(new LocalStrategy(async (username, password, done) => {
+    const params = {
+        TableName: process.env.DYNAMODB_USERS_TABLE,
+        Key: {
+            username: username,
+        },
+    };
+
     try {
-        const user = await User.findOne({ username });
+        const result = await dynamoDB.get(params).promise();
+        const user = result.Item;
         if (!user || !bcrypt.compareSync(password, user.password)) {
             return done(null, false, { message: 'Incorrect username or password.' });
         }
@@ -106,9 +126,8 @@ passport.use(new LocalStrategy(async (username, password, done) => {
     }
 }));
 
-passport.serializeUser((user, done) => {
-    done(null, user.id);
-});
+
+passport.serializeUser((user, done) => done(null, user.id));
 
 passport.deserializeUser(async (id, done) => {
     try {
@@ -119,7 +138,7 @@ passport.deserializeUser(async (id, done) => {
     }
 });
 
-// Routes for user authentication
+// Route for main page (requires authentication)
 app.get('/', isAuthenticated, (req, res) => {
     res.render('index', {
         video: null,
@@ -129,9 +148,8 @@ app.get('/', isAuthenticated, (req, res) => {
     });
 });
 
-app.get('/login', (req, res) => {
-    res.render('login', { message: req.flash('error') });
-});
+// Route for user authentication and login
+app.get('/login', (req, res) => res.render('login', { message: req.flash('error') }));
 
 app.post('/login', passport.authenticate('local', {
     successRedirect: '/',
@@ -139,15 +157,24 @@ app.post('/login', passport.authenticate('local', {
     failureFlash: true
 }));
 
-app.get('/register', (req, res) => {
-    res.render('register');
-});
+// Route for registering a new user
+app.get('/register', (req, res) => res.render('register'));
 
+// Update user registration to save in DynamoDB
 app.post('/register', async (req, res) => {
     const { username, password } = req.body;
     const hashedPassword = bcrypt.hashSync(password, 10);
+    const params = {
+        TableName: process.env.DYNAMODB_TABLE_NAME,
+        Item: {
+            userId: Date.now().toString(), // Generate a unique ID for each user
+            username: username,
+            password: hashedPassword,
+        },
+    };
+
     try {
-        const user = await User.create({ username, password: hashedPassword });
+        await dynamoDB.put(params).promise();
         res.redirect('/login');
     } catch (error) {
         console.error('Error registering user:', error);
@@ -155,39 +182,60 @@ app.post('/register', async (req, res) => {
     }
 });
 
+
+// Logout route
 app.get('/logout', (req, res, next) => {
     req.logout((err) => {
-        if (err) { return next(err); }
+        if (err) return next(err);
         res.redirect('/login');
     });
 });
 
-// Set storage engine for Multer
-const storage = multer.diskStorage({
-    destination: './videos/',
-    filename: (req, file, cb) => {
-        cb(null, file.fieldname + '-' + Date.now() + path.extname(file.originalname));
+// Retrieve Videos from DynamoDB
+app.get('/videos', isAuthenticated, async (req, res) => {
+    const params = {
+        TableName: process.env.DYNAMODB_TABLE_NAME,
+        KeyConditionExpression: 'username = :username',
+        ExpressionAttributeValues: {
+            ':username': req.user.username,
+        },
+    };
+
+    try {
+        const data = await dynamoDB.query(params).promise();
+        res.render('index', {
+            videos: data.Items,
+            user: req.user
+        });
+    } catch (error) {
+        console.error('Error fetching videos from DynamoDB:', error);
+        res.status(500).send('Error fetching videos');
     }
 });
 
-// Init upload
+
+// Multer Storage Setup for video uploads
+const storage = multer.diskStorage({
+    destination: './videos/',
+    filename: (req, file, cb) => {
+        cb(null, `videoFile-${Date.now()}${path.extname(file.originalname)}`);
+    }
+});
+
+// Initialize Multer upload
 const upload = multer({
-    storage: storage,
+    storage,
     limits: { fileSize: 1000000000 }, // 1GB limit
     fileFilter: (req, file, cb) => {
         const filetypes = /mp4|avi|mov|mkv/;
         const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
         const mimetype = filetypes.test(file.mimetype);
-
-        if (mimetype && extname) {
-            return cb(null, true);
-        } else {
-            cb('Error: Videos Only!');
-        }
+        if (mimetype && extname) return cb(null, true);
+        else cb('Error: Videos Only!');
     }
 }).single('videoFile');
 
-// Route for uploading videos
+// Video upload route
 app.post('/upload', isAuthenticated, (req, res) => {
     upload(req, res, async (err) => {
         if (err) {
@@ -201,10 +249,10 @@ app.post('/upload', isAuthenticated, (req, res) => {
                 filename: req.file.filename,
                 UserId: req.user.id,
             });
-            res.render('index', {
-                video: req.file.filename,
-                preview: null,
-                msg: 'Video uploaded successfully',
+            res.render('index', { 
+                video: req.file.filename, 
+                preview: null, 
+                msg: 'Video uploaded successfully', 
                 user: req.user  // Pass the user object
             });
         } catch (error) {
@@ -214,115 +262,38 @@ app.post('/upload', isAuthenticated, (req, res) => {
     });
 });
 
-// Route for processing videos
+// Process video route (CPU intensive task - video processing with FFmpeg)
 app.post('/process', isAuthenticated, (req, res) => {
     const { format, resolution, video } = req.body;
-
-    if (!format || !resolution || !video) {
-        return res.status(400).send('Format, resolution, or video file not specified.');
-    }
+    if (!format || !resolution || !video) return res.status(400).send('Format, resolution, or video file not specified.');
 
     const output = `./videos/processed-${Date.now()}.${format}`;
-
+    
     let scaleOption;
+
     switch (resolution) {
-        case '1080p':
-            scaleOption = '1920:1080';
-            break;
-        case '720p':
-            scaleOption = '1280:720';
-            break;
-        case '480p':
-            scaleOption = '640:480';
-            break;
-        default:
-            scaleOption = '1920:1080'; // Default to 1080p
-            break;
+        case '1080p': scaleOption = '1920:1080'; break;
+        case '720p': scaleOption = '1280:720'; break;
+        case '480p': scaleOption = '640:480'; break;
+        default: scaleOption = '1920:1080';
     }
 
     ffmpeg(`./videos/${video}`)
         .outputOptions(['-vf', `scale=${scaleOption}`])
         .toFormat(format)
         .output(output)
-        .on('end', () => {
-            res.download(output);
-        })
-        .on('error', (err) => {
-            console.error('Error during processing:', err);
-            res.status(500).send('Error processing video');
-        })
+        .on('end', () => res.download(output))
+        .on('error', (err) => res.status(500).send('Error processing video'))
         .run();
 });
 
-// Route to get uploaded videos for the user
-app.get('/api/videos', isAuthenticated, async (req, res) => {
-    try {
-        const videos = await Video.find({ UserId: req.user._id });
-        res.json(videos);
-    } catch (err) {
-        res.status(500).send('Error fetching videos');
-    }
-});
+// Helper: User Authentication Check
+function isAuthenticated(req, res, next) {
+    if (req.isAuthenticated()) return next();
+    else res.redirect('/login');
+}
 
-// Route to delete a video
-app.delete('/api/videos/:id', isAuthenticated, async (req, res) => {
-    try {
-        // Find and delete the video from the database
-        const video = await Video.findByIdAndDelete(req.params.id);
-        if (!video) {
-            return res.status(404).send('Video not found');
-        }
-
-        // Construct the file path based on the video filename
-        const filePath = path.join(__dirname, 'videos', video.filename);
-
-        // Check if the file exists before trying to delete it
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-            console.log('File deleted:', filePath);
-        } else {
-            console.log('File not found:', filePath);
-        }
-
-        // Respond with success
-        res.status(200).send('Video deleted successfully');
-    } catch (err) {
-        console.error('Error deleting video:', err);
-        res.status(500).send('Error deleting video');
-    }
-});
-
-app.get('/search', isAuthenticated, async (req, res) => {
-    const query = req.query.q;
-    if (!query) {
-        return res.status(400).send('Query is required');
-    }
-
-    try {
-        const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
-            params: {
-                part: 'snippet',
-                q: query,
-                key: process.env.YOUTUBE_API_KEY,
-                maxResults: 5,
-            }
-        });
-
-        const videos = response.data.items.map(item => ({
-            title: item.snippet.title,
-            description: item.snippet.description,
-            thumbnail: item.snippet.thumbnails.default.url,
-            videoId: item.id.videoId,
-        }));
-
-        res.render('searchResults', { videos, query, user: req.user || null });
-
-    } catch (error) {
-        console.error('Error fetching data from YouTube:', error);
-        res.status(500).send('Error fetching data from YouTube');
-    }
-});
-
+// Server listen
 server.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
+    console.log(`Server running at http://localhost:${port}`);
 });
