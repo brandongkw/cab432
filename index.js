@@ -1,5 +1,3 @@
-// Testing to push to repo
-
 require('dotenv').config();
 const express = require('express');
 const http = require('http');
@@ -8,8 +6,6 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const path = require('path');
 const fs = require('fs');
-const passport = require('passport');
-const LocalStrategy = require('passport-local').Strategy;
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const flash = require('connect-flash');
@@ -21,6 +17,40 @@ const app = express();
 const port = process.env.PORT || 3000;
 const axios = require('axios');
 
+const userPoolId = process.env.COGNITO_USER_POOL_ID;
+const clientId = process.env.COGNITO_CLIENT_ID;
+
+// Middleware for parsing cookies
+const cookieParser = require('cookie-parser');
+const secureCookie = process.env.NODE_ENV === 'production';  // Use secure cookies in production
+
+// AWS SDK and CognitoIdentityServiceProvider
+const AWS = require('aws-sdk');
+const CognitoIdentityServiceProvider = new AWS.CognitoIdentityServiceProvider(); ``
+const { CognitoJwtVerifier } = require('aws-jwt-verify');
+
+const verifier = CognitoJwtVerifier.create({
+    userPoolId: process.env.COGNITO_USER_POOL_ID,
+    clientId: process.env.COGNITO_CLIENT_ID,
+    tokenUse: 'id',
+});
+
+const isAuthenticated = async (req, res, next) => {
+    const token = req.cookies.jwt;
+    if (!token) {
+        return res.redirect('/login');
+    }
+
+    try {
+        const payload = await verifier.verify(token);
+        req.user = payload;  // Attach the payload to req.user
+        next();
+    } catch (error) {
+        return res.status(401).send('Unauthorized');
+    }
+};
+
+// Set the path to the ffmpeg binary
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 // Create an HTTP server using the express app
@@ -60,14 +90,6 @@ function sendProgressUpdate(ws, progress) {
     }
 }
 
-function isAuthenticated(req, res, next) {
-    if (req.isAuthenticated && req.isAuthenticated()) {
-        return next();
-    } else {
-        res.redirect('/login');
-    }
-}
-
 // Connect to MongoDB
 mongoose.connect(process.env.DATABASE_URL, {
     useNewUrlParser: true,
@@ -80,44 +102,11 @@ mongoose.connect(process.env.DATABASE_URL, {
 app.use(express.static('public'));
 app.use(express.urlencoded({ extended: true }));
 app.use('/videos', express.static(path.join(__dirname, 'videos')));
-app.use(session({
-    secret: process.env.SECRET_KEY,
-    resave: false,
-    saveUninitialized: false,
-    cookie: { secure: false }
-}));
-app.use(passport.initialize());
-app.use(passport.session());
 app.use(flash());
+app.use(cookieParser());
 
 // View engine setup
 app.set('view engine', 'ejs');
-
-// Passport authentication strategy
-passport.use(new LocalStrategy(async (username, password, done) => {
-    try {
-        const user = await User.findOne({ username });
-        if (!user || !bcrypt.compareSync(password, user.password)) {
-            return done(null, false, { message: 'Incorrect username or password.' });
-        }
-        return done(null, user);
-    } catch (error) {
-        return done(error);
-    }
-}));
-
-passport.serializeUser((user, done) => {
-    done(null, user.id);
-});
-
-passport.deserializeUser(async (id, done) => {
-    try {
-        const user = await User.findById(id);
-        done(null, user);
-    } catch (err) {
-        done(err, null);
-    }
-});
 
 // Routes for user authentication
 app.get('/', isAuthenticated, (req, res) => {
@@ -130,14 +119,32 @@ app.get('/', isAuthenticated, (req, res) => {
 });
 
 app.get('/login', (req, res) => {
-    res.render('login', { message: req.flash('error') });
+    res.render('login', { message: req.flash('error') || '' });  // Default to empty string
 });
 
-app.post('/login', passport.authenticate('local', {
-    successRedirect: '/',
-    failureRedirect: '/login',
-    failureFlash: true
-}));
+app.post('/login', async (req, res) => {
+    const { username, password } = req.body;
+
+    const params = {
+        AuthFlow: 'USER_PASSWORD_AUTH',
+        ClientId: process.env.COGNITO_CLIENT_ID,
+        AuthParameters: {
+            USERNAME: username,
+            PASSWORD: password
+        }
+    };
+
+    try {
+        const data = await CognitoIdentityServiceProvider.initiateAuth(params).promise();
+        const { IdToken } = data.AuthenticationResult;
+        res.cookie('jwt', IdToken, { httpOnly: true, secure: secureCookie });
+        res.redirect('/');
+    } catch (error) {
+        console.error('Error logging in:', error);
+        res.render('login', { message: 'Invalid login credentials. Please try again.' });  // Pass error message
+    }
+});
+
 
 app.get('/register', (req, res) => {
     res.render('register');
@@ -145,22 +152,52 @@ app.get('/register', (req, res) => {
 
 app.post('/register', async (req, res) => {
     const { username, password } = req.body;
-    const hashedPassword = bcrypt.hashSync(password, 10);
+
+    const params = {
+        ClientId: process.env.COGNITO_CLIENT_ID,
+        Username: username,
+        Password: password,
+        UserAttributes: [
+            {
+                Name: 'email',
+                Value: username  // Assuming username is email
+            }
+        ]
+    };
+
     try {
-        const user = await User.create({ username, password: hashedPassword });
-        res.redirect('/login');
+        const data = await CognitoIdentityServiceProvider.signUp(params).promise();
+        res.redirect('/confirm-email');  // Redirect to a confirmation page for email verification
     } catch (error) {
         console.error('Error registering user:', error);
-        res.status(500).send('Error registering user');
+        res.render('register', { message: 'Error registering user. Try again.' });  // Pass the error message to the register page
     }
 });
 
-app.get('/logout', (req, res, next) => {
-    req.logout((err) => {
-        if (err) { return next(err); }
-        res.redirect('/login');
-    });
+app.post('/confirm-email', async (req, res) => {
+    const { username, confirmationCode } = req.body;
+
+    const params = {
+        ClientId: process.env.COGNITO_CLIENT_ID,
+        Username: username,
+        ConfirmationCode: confirmationCode
+    };
+
+    try {
+        await CognitoIdentityServiceProvider.confirmSignUp(params).promise();
+        res.redirect('/login');  // After confirming, redirect to the login page
+    } catch (error) {
+        console.error('Error confirming email:', error);
+        res.render('confirmEmail', { message: 'Error confirming email. Please try again.' });
+    }
 });
+
+
+app.get('/logout', (req, res) => {
+    res.clearCookie('jwt');  // Clear the JWT token
+    res.redirect('/login');
+});
+
 
 // Set storage engine for Multer
 const storage = multer.diskStorage({
@@ -197,15 +234,16 @@ app.post('/upload', isAuthenticated, (req, res) => {
             return res.render('index', { msg: 'No file selected!', user: req.user });
         }
         try {
+            const userId = req.user.sub;  // Access the user ID from the JWT payload
             const video = await Video.create({
                 filename: req.file.filename,
-                UserId: req.user.id,
+                UserId: userId,  // Use the user ID from JWT
             });
             res.render('index', {
                 video: req.file.filename,
                 preview: null,
                 msg: 'Video uploaded successfully',
-                user: req.user  // Pass the user object
+                user: req.user  // Pass the user object to the EJS template
             });
         } catch (error) {
             console.error('Error uploading video:', error);
@@ -257,12 +295,14 @@ app.post('/process', isAuthenticated, (req, res) => {
 // Route to get uploaded videos for the user
 app.get('/api/videos', isAuthenticated, async (req, res) => {
     try {
-        const videos = await Video.find({ UserId: req.user._id });
+        const userId = req.user.sub;  // Get user ID from the JWT
+        const videos = await Video.find({ UserId: userId });
         res.json(videos);
     } catch (err) {
         res.status(500).send('Error fetching videos');
     }
 });
+
 
 // Route to delete a video
 app.delete('/api/videos/:id', isAuthenticated, async (req, res) => {
@@ -321,6 +361,12 @@ app.get('/search', isAuthenticated, async (req, res) => {
         console.error('Error fetching data from YouTube:', error);
         res.status(500).send('Error fetching data from YouTube');
     }
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+    console.error('An unexpected error occurred:', err);
+    res.status(500).send('Something went wrong. Please try again later.');
 });
 
 server.listen(port, () => {
