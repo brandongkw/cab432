@@ -9,14 +9,18 @@ const fs = require('fs');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const flash = require('connect-flash');
-const mongoose = require('mongoose');
+// const mongoose = require('mongoose');
 const WebSocket = require('ws');
 const User = require('./models/user');
 const Video = require('./models/video');
+const axios = require('axios');
+const AWS = require('aws-sdk');
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBDocumentClient, PutCommand, GetCommand, QueryCommand } = require("@aws-sdk/lib-dynamodb");
+
 const app = express();
 const port = process.env.PORT || 3000;
-const axios = require('axios');
-
 const userPoolId = process.env.COGNITO_USER_POOL_ID;
 const clientId = process.env.COGNITO_CLIENT_ID;
 
@@ -53,18 +57,27 @@ const isAuthenticated = async (req, res, next) => {
 // Set the path to the ffmpeg binary
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-// Create an HTTP server using the express app
+// AWS SDK Configuration for S3
+AWS.config.update({
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+    region: process.env.AWS_REGION,
+});
+const s3 = new S3Client({ region: process.env.REGION });
+const dynamoDB = new AWS.DynamoDB.DocumentClient();
+
+// Create HTTP server using the express app
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ noServer: true });
 
-// Handle WebSocket connection
+// Handle WebSocket connections for live progress tracking
 wss.on('connection', (ws) => {
     console.log('WebSocket connected');
     ws.on('message', (message) => {
-        console.log('received:', message);
+        console.log('Received:', message);
     });
 
-    // Send progress updates to the client
+    // Example progress simulation
     ws.send(JSON.stringify({ progress: 0 }));
     let progress = 0;
     const interval = setInterval(() => {
@@ -91,14 +104,14 @@ function sendProgressUpdate(ws, progress) {
 }
 
 // Connect to MongoDB
-mongoose.connect(process.env.DATABASE_URL, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-})
-    .then(() => console.log('MongoDB connected'))
-    .catch((err) => console.error('MongoDB connection error:', err));
+// mongoose.connect(process.env.DATABASE_URL, {
+//   useNewUrlParser: true,
+//   useUnifiedTopology: true,
+// })
+// .then(() => console.log('MongoDB connected'))
+// .catch((err) => console.error('MongoDB connection error:', err));
 
-// Middleware
+// Middleware Setup
 app.use(express.static('public'));
 app.use(express.urlencoded({ extended: true }));
 app.use('/videos', express.static(path.join(__dirname, 'videos')));
@@ -108,7 +121,7 @@ app.use(cookieParser());
 // View engine setup
 app.set('view engine', 'ejs');
 
-// Routes for user authentication
+// Route for main page (requires authentication)
 app.get('/', isAuthenticated, (req, res) => {
     res.render('index', {
         video: null,
@@ -121,6 +134,8 @@ app.get('/', isAuthenticated, (req, res) => {
 app.get('/login', (req, res) => {
     res.render('login', { message: req.flash('error') || '' });  // Default to empty string
 });
+// Route for user authentication and login
+app.get('/login', (req, res) => res.render('login', { message: req.flash('error') }));
 
 app.post('/login', async (req, res) => {
     const { username, password } = req.body;
@@ -146,10 +161,10 @@ app.post('/login', async (req, res) => {
 });
 
 
-app.get('/register', (req, res) => {
-    res.render('register');
-});
+// Route for registering a new user
+app.get('/register', (req, res) => res.render('register'));
 
+// Update user registration to save in DynamoDB
 app.post('/register', async (req, res) => {
     const { username, password } = req.body;
 
@@ -168,11 +183,24 @@ app.post('/register', async (req, res) => {
     try {
         const data = await CognitoIdentityServiceProvider.signUp(params).promise();
         res.redirect('/confirm-email');  // Redirect to a confirmation page for email verification
-    } catch (error) {
-        console.error('Error registering user:', error);
-        res.render('register', { message: 'Error registering user. Try again.' });  // Pass the error message to the register page
-    }
-});
+        const hashedPassword = bcrypt.hashSync(password, 10);
+        const params = {
+            TableName: process.env.DYNAMODB_TABLE_NAME,
+            Item: {
+                userId: Date.now().toString(), // Generate a unique ID for each user
+                username: username,
+                password: hashedPassword,
+            },
+        };
+
+        try {
+            await dynamoDB.put(params).promise();
+            res.redirect('/login');
+        } catch (error) {
+            console.error('Error registering user:', error);
+            res.render('register', { message: 'Error registering user. Try again.' });  // Pass the error message to the register page
+        }
+    });
 
 app.post('/confirm-email', async (req, res) => {
     const { username, confirmationCode } = req.body;
@@ -196,179 +224,197 @@ app.post('/confirm-email', async (req, res) => {
 app.get('/logout', (req, res) => {
     res.clearCookie('jwt');  // Clear the JWT token
     res.redirect('/login');
-});
+
+    // Logout route
+    app.get('/logout', (req, res, next) => {
+        req.logout((err) => {
+            if (err) return next(err);
+            res.redirect('/login');
+        });
+    });
 
 
-// Set storage engine for Multer
-const storage = multer.diskStorage({
-    destination: './videos/',
-    filename: (req, file, cb) => {
-        cb(null, file.fieldname + '-' + Date.now() + path.extname(file.originalname));
-    }
-});
+    // Retrieve Videos from DynamoDB
+    app.get('/videos', isAuthenticated, async (req, res) => {
+        const params = {
+            TableName: process.env.DYNAMODB_TABLE_NAME,
+            KeyConditionExpression: 'username = :username',
+            ExpressionAttributeValues: {
+                ':username': req.user.username,
+            },
+        };
 
-// Init upload
-const upload = multer({
-    storage: storage,
-    limits: { fileSize: 1000000000 }, // 1GB limit
-    fileFilter: (req, file, cb) => {
-        const filetypes = /mp4|avi|mov|mkv/;
-        const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
-        const mimetype = filetypes.test(file.mimetype);
-
-        if (mimetype && extname) {
-            return cb(null, true);
-        } else {
-            cb('Error: Videos Only!');
-        }
-    }
-}).single('videoFile');
-
-// Route for uploading videos
-app.post('/upload', isAuthenticated, (req, res) => {
-    upload(req, res, async (err) => {
-        if (err) {
-            return res.render('index', { msg: err, user: req.user });
-        }
-        if (!req.file) {
-            return res.render('index', { msg: 'No file selected!', user: req.user });
-        }
         try {
-            const userId = req.user.sub;  // Access the user ID from the JWT payload
-            const video = await Video.create({
-                filename: req.file.filename,
-                UserId: userId,  // Use the user ID from JWT
-            });
+            const data = await dynamoDB.query(params).promise();
             res.render('index', {
-                video: req.file.filename,
-                preview: null,
-                msg: 'Video uploaded successfully',
-                user: req.user  // Pass the user object to the EJS template
+                videos: data.Items,
+                user: req.user
             });
         } catch (error) {
-            console.error('Error uploading video:', error);
-            res.status(500).send('Error uploading video');
+            console.error('Error fetching videos from DynamoDB:', error);
+            res.status(500).send('Error fetching videos');
         }
     });
-});
-
-// Route for processing videos
-app.post('/process', isAuthenticated, (req, res) => {
-    const { format, resolution, video } = req.body;
-
-    if (!format || !resolution || !video) {
-        return res.status(400).send('Format, resolution, or video file not specified.');
-    }
-
-    const output = `./videos/processed-${Date.now()}.${format}`;
-
-    let scaleOption;
-    switch (resolution) {
-        case '1080p':
-            scaleOption = '1920:1080';
-            break;
-        case '720p':
-            scaleOption = '1280:720';
-            break;
-        case '480p':
-            scaleOption = '640:480';
-            break;
-        default:
-            scaleOption = '1920:1080'; // Default to 1080p
-            break;
-    }
-
-    ffmpeg(`./videos/${video}`)
-        .outputOptions(['-vf', `scale=${scaleOption}`])
-        .toFormat(format)
-        .output(output)
-        .on('end', () => {
-            res.download(output);
-        })
-        .on('error', (err) => {
-            console.error('Error during processing:', err);
-            res.status(500).send('Error processing video');
-        })
-        .run();
-});
-
-// Route to get uploaded videos for the user
-app.get('/api/videos', isAuthenticated, async (req, res) => {
-    try {
-        const userId = req.user.sub;  // Get user ID from the JWT
-        const videos = await Video.find({ UserId: userId });
-        res.json(videos);
-    } catch (err) {
-        res.status(500).send('Error fetching videos');
-    }
-});
 
 
-// Route to delete a video
-app.delete('/api/videos/:id', isAuthenticated, async (req, res) => {
-    try {
-        // Find and delete the video from the database
-        const video = await Video.findByIdAndDelete(req.params.id);
-        if (!video) {
-            return res.status(404).send('Video not found');
+    // Multer Storage Setup for video uploads
+    const storage = multer.diskStorage({
+        destination: './videos/',
+        filename: (req, file, cb) => {
+            cb(null, `videoFile-${Date.now()}${path.extname(file.originalname)}`);
         }
+    });
 
-        // Construct the file path based on the video filename
-        const filePath = path.join(__dirname, 'videos', video.filename);
-
-        // Check if the file exists before trying to delete it
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
-            console.log('File deleted:', filePath);
-        } else {
-            console.log('File not found:', filePath);
+    // Initialize Multer upload
+    const upload = multer({
+        storage,
+        limits: { fileSize: 1000000000 }, // 1GB limit
+        fileFilter: (req, file, cb) => {
+            const filetypes = /mp4|avi|mov|mkv/;
+            const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+            const mimetype = filetypes.test(file.mimetype);
+            if (mimetype && extname) return cb(null, true);
+            else cb('Error: Videos Only!');
         }
+    }).single('videoFile');
 
-        // Respond with success
-        res.status(200).send('Video deleted successfully');
-    } catch (err) {
-        console.error('Error deleting video:', err);
-        res.status(500).send('Error deleting video');
-    }
-});
-
-app.get('/search', isAuthenticated, async (req, res) => {
-    const query = req.query.q;
-    if (!query) {
-        return res.status(400).send('Query is required');
-    }
-
-    try {
-        const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
-            params: {
-                part: 'snippet',
-                q: query,
-                key: process.env.YOUTUBE_API_KEY,
-                maxResults: 5,
+    // Video upload route
+    app.post('/upload', isAuthenticated, (req, res) => {
+        upload(req, res, async (err) => {
+            if (err) {
+                return res.render('index', { msg: err, user: req.user });
+            }
+            if (!req.file) {
+                return res.render('index', { msg: 'No file selected!', user: req.user });
+            }
+            try {
+                const userId = req.user.sub;  // Access the user ID from the JWT payload
+                const video = await Video.create({
+                    filename: req.file.filename,
+                    UserId: userId,  // Use the user ID from JWT
+                });
+                res.render('index', {
+                    video: req.file.filename,
+                    preview: null,
+                    msg: 'Video uploaded successfully',
+                    user: req.user  // Pass the user object to the EJS template
+                });
+            } catch (error) {
+                console.error('Error uploading video:', error);
+                res.status(500).send('Error uploading video');
             }
         });
+    });
 
-        const videos = response.data.items.map(item => ({
-            title: item.snippet.title,
-            description: item.snippet.description,
-            thumbnail: item.snippet.thumbnails.default.url,
-            videoId: item.id.videoId,
-        }));
+    // Process video route (CPU intensive task - video processing with FFmpeg)
+    app.post('/process', isAuthenticated, (req, res) => {
+        const { format, resolution, video } = req.body;
+        if (!format || !resolution || !video) return res.status(400).send('Format, resolution, or video file not specified.');
 
-        res.render('searchResults', { videos, query, user: req.user || null });
+        const output = `./videos/processed-${Date.now()}.${format}`;
 
-    } catch (error) {
-        console.error('Error fetching data from YouTube:', error);
-        res.status(500).send('Error fetching data from YouTube');
+        let scaleOption;
+
+        switch (resolution) {
+            case '1080p': scaleOption = '1920:1080'; break;
+            case '720p': scaleOption = '1280:720'; break;
+            case '480p': scaleOption = '640:480'; break;
+            default: scaleOption = '1920:1080';
+        }
+
+        ffmpeg(`./videos/${video}`)
+            .outputOptions(['-vf', `scale=${scaleOption}`])
+            .toFormat(format)
+            .output(output)
+            .on('end', () => res.download(output))
+            .on('error', (err) => res.status(500).send('Error processing video'))
+            .run();
+    });
+
+    // Route to get uploaded videos for the user
+    app.get('/api/videos', isAuthenticated, async (req, res) => {
+        try {
+            const userId = req.user.sub;  // Get user ID from the JWT
+            const videos = await Video.find({ UserId: userId });
+            res.json(videos);
+        } catch (err) {
+            res.status(500).send('Error fetching videos');
+        }
+    });
+
+
+    // Route to delete a video
+    app.delete('/api/videos/:id', isAuthenticated, async (req, res) => {
+        try {
+            // Find and delete the video from the database
+            const video = await Video.findByIdAndDelete(req.params.id);
+            if (!video) {
+                return res.status(404).send('Video not found');
+            }
+
+            // Construct the file path based on the video filename
+            const filePath = path.join(__dirname, 'videos', video.filename);
+
+            // Check if the file exists before trying to delete it
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+                console.log('File deleted:', filePath);
+            } else {
+                console.log('File not found:', filePath);
+            }
+
+            // Respond with success
+            res.status(200).send('Video deleted successfully');
+        } catch (err) {
+            console.error('Error deleting video:', err);
+            res.status(500).send('Error deleting video');
+        }
+    });
+
+    app.get('/search', isAuthenticated, async (req, res) => {
+        const query = req.query.q;
+        if (!query) {
+            return res.status(400).send('Query is required');
+        }
+
+        try {
+            const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+                params: {
+                    part: 'snippet',
+                    q: query,
+                    key: process.env.YOUTUBE_API_KEY,
+                    maxResults: 5,
+                }
+            });
+
+            const videos = response.data.items.map(item => ({
+                title: item.snippet.title,
+                description: item.snippet.description,
+                thumbnail: item.snippet.thumbnails.default.url,
+                videoId: item.id.videoId,
+            }));
+
+            res.render('searchResults', { videos, query, user: req.user || null });
+
+        } catch (error) {
+            console.error('Error fetching data from YouTube:', error);
+            res.status(500).send('Error fetching data from YouTube');
+        }
+    });
+
+    // Global error handler
+    app.use((err, req, res, next) => {
+        console.error('An unexpected error occurred:', err);
+        res.status(500).send('Something went wrong. Please try again later.');
+    });
+
+    // Helper: User Authentication Check
+    function isAuthenticated(req, res, next) {
+        if (req.isAuthenticated()) return next();
+        else res.redirect('/login');
     }
-});
 
-// Global error handler
-app.use((err, req, res, next) => {
-    console.error('An unexpected error occurred:', err);
-    res.status(500).send('Something went wrong. Please try again later.');
-});
-
-server.listen(port, () => {
-    console.log(`Server is running on http://localhost:${port}`);
-});
+    // Server listen
+    server.listen(port, () => {
+        console.log(`Server running at http://localhost:${port}`);
+    });
