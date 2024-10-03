@@ -14,6 +14,8 @@ const axios = require('axios');
 const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
 const { DynamoDBDocumentClient, PutCommand, QueryCommand } = require("@aws-sdk/lib-dynamodb");
 const WebSocket = require('ws');
+const { GetObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
 // AWS Cognito setup
 const AWS = require('aws-sdk');
@@ -32,6 +34,7 @@ AWS.config.update({
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
     region: process.env.AWS_REGION,
 });
+
 const s3 = new S3Client({ region: process.env.AWS_REGION });
 const dynamoDB = DynamoDBDocumentClient.from(new AWS.DynamoDB());
 
@@ -48,6 +51,13 @@ app.use('/videos', express.static(path.join(__dirname, 'videos')));
 app.use(flash());
 app.use(cookieParser());
 app.set('view engine', 'ejs');
+app.use(session({
+    secret: 'yourSecretKey', // Replace with a secure secret key
+    resave: false,
+    saveUninitialized: true,
+    cookie: { secure: process.env.NODE_ENV === 'production' }  // Ensure secure cookies in production
+}));
+app.use(flash());
 
 // WebSocket setup for progress tracking
 const server = http.createServer(app);
@@ -84,12 +94,27 @@ const isAuthenticated = async (req, res, next) => {
     }
     try {
         const payload = await verifier.verify(token);
-        req.user = payload;  // Attach the payload to req.user
+        req.user = payload;
         next();
     } catch (error) {
+        // Handle expired token
+        if (error.name === 'TokenExpiredError') {
+            return res.redirect('/login');  // Redirect to login if token is expired
+        }
         return res.status(401).send('Unauthorized');
     }
 };
+
+// Function to generate pre-signed URL
+async function generatePreSignedUrl(filename) {
+    const params = {
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: `videos/${filename}`,
+    };
+    const command = new GetObjectCommand(params);
+    const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });  // URL expires in 1 hour
+    return signedUrl;
+}
 
 // Route for main page (requires authentication)
 app.get('/', isAuthenticated, (req, res) => {
@@ -112,64 +137,45 @@ app.post('/login', async (req, res) => {
     try {
         const data = await CognitoIdentityServiceProvider.initiateAuth(params).promise();
         const { IdToken } = data.AuthenticationResult;
-        res.cookie('jwt', IdToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production' });
+        res.cookie('jwt', IdToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 3600000  // Cookie expires in 1 hour
+        });
         res.redirect('/');
     } catch (error) {
+        console.error('Login Error:', error);  // Log the actual error
         res.render('login', { message: 'Invalid login credentials. Please try again.' });
     }
 });
 
 // Register Route
 app.get('/register', (req, res) => {
-    res.render('register');
+    res.render('register', { message: '' });  // Pass an empty message initially
 });
 
 app.post('/register', async (req, res) => {
-    const { username, password } = req.body;
+    const { username, email, password } = req.body;
 
-    // Register user in Cognito
     const params = {
         ClientId: process.env.COGNITO_CLIENT_ID,
         Username: username,
         Password: password,
-        UserAttributes: [{ Name: 'email', Value: username }]
+        UserAttributes: [{ Name: 'email', Value: email }]
     };
 
     try {
         await CognitoIdentityServiceProvider.signUp(params).promise();
-
-        // Save user in DynamoDB
-        const hashedPassword = bcrypt.hashSync(password, 10);
-        const dynamoParams = {
-            TableName: process.env.DYNAMODB_TABLE_NAME,
-            Item: {
-                userId: Date.now().toString(),
-                username: username,
-                password: hashedPassword,
-            },
-        };
-        await dynamoDB.send(new PutCommand(dynamoParams));
-
-        res.redirect('/confirm-email');
-    } catch (error) {
-        res.render('register', { message: 'Error registering user. Try again.' });
-    }
-});
-
-// Email Confirmation Route
-app.post('/confirm-email', async (req, res) => {
-    const { username, confirmationCode } = req.body;
-    const params = {
-        ClientId: process.env.COGNITO_CLIENT_ID,
-        Username: username,
-        ConfirmationCode: confirmationCode
-    };
-
-    try {
-        await CognitoIdentityServiceProvider.confirmSignUp(params).promise();
         res.redirect('/login');
     } catch (error) {
-        res.render('confirmEmail', { message: 'Error confirming email. Please try again.' });
+        console.error('Registration Error:', error);
+        if (error.code === 'InvalidPasswordException') {
+            res.render('register', { message: 'Password must contain at least 8 characters, including an uppercase letter, a number, and a special character.' });
+        } else if (error.code === 'UsernameExistsException') {
+            res.render('register', { message: 'Username already exists. Please try a different one.' });
+        } else {
+            res.render('register', { message: 'Error registering user. Try again.' });
+        }
     }
 });
 
@@ -224,6 +230,7 @@ app.post('/upload', isAuthenticated, (req, res) => {
 });
 
 // Get uploaded videos for the user
+// When fetching videos, generates the pre-signed URL to fetch the video from S3
 app.get('/videos', isAuthenticated, async (req, res) => {
     const params = {
         TableName: process.env.DYNAMODB_TABLE_NAME,
@@ -233,7 +240,16 @@ app.get('/videos', isAuthenticated, async (req, res) => {
 
     try {
         const data = await dynamoDB.send(new QueryCommand(params));
-        res.render('index', { videos: data.Items, user: req.user });
+
+        // Generate pre-signed URLs for each video
+        const videosWithUrls = await Promise.all(
+            data.Items.map(async (video) => {
+                const url = await generatePreSignedUrl(video.filename);
+                return { ...video, url };
+            })
+        );
+
+        res.render('index', { videos: videosWithUrls, user: req.user });
     } catch (error) {
         res.status(500).send('Error fetching videos');
     }
