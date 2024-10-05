@@ -37,6 +37,7 @@ AWS.config.update({
 
 const s3 = new S3Client({ region: process.env.AWS_REGION });
 const dynamoDB = DynamoDBDocumentClient.from(new AWS.DynamoDB());
+console.log('AWS Credentials:', s3.config.credentials);
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -94,16 +95,14 @@ const isAuthenticated = async (req, res, next) => {
     }
     try {
         const payload = await verifier.verify(token);
-        req.user = payload;
+        req.user = payload; // User info extracted from token
         next();
     } catch (error) {
-        // Handle expired token
-        if (error.name === 'TokenExpiredError') {
-            return res.redirect('/login');  // Redirect to login if token is expired
-        }
-        return res.status(401).send('Unauthorized');
+        console.error("Error verifying token: ", error);
+        return res.status(401).send('Unauthorized. Please log in again.');
     }
 };
+
 
 // Function to generate pre-signed URL
 async function generatePreSignedUrl(filename) {
@@ -133,19 +132,31 @@ app.post('/login', async (req, res) => {
         ClientId: process.env.COGNITO_CLIENT_ID,
         AuthParameters: { USERNAME: username, PASSWORD: password }
     };
-
     try {
         const data = await CognitoIdentityServiceProvider.initiateAuth(params).promise();
-        const { IdToken } = data.AuthenticationResult;
+        const { IdToken, AccessToken } = data.AuthenticationResult;
+
+        // Store the new tokens as cookies or in session storage
         res.cookie('jwt', IdToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
-            maxAge: 3600000  // Cookie expires in 1 hour
+            maxAge: 3600000  // Token valid for 1 hour
         });
+
+        // Optionally store access token if needed
+        res.cookie('access_token', AccessToken, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === 'production',
+            maxAge: 3600000  // Token valid for 1 hour
+        });
+
+        const tokenPayload = jwt.decode(IdToken); // jwt.decode will extract token details
+        console.log("Token expires at:", new Date(tokenPayload.exp * 1000)); // Token expiry time in human-readable format
+
         res.redirect('/');
     } catch (error) {
-        console.error('Login Error:', error);  // Log the actual error
-        res.render('login', { message: 'Invalid login credentials. Please try again.' });
+        console.error('Login Error:', error);
+        res.render('login', { message: 'Invalid login credentials.' });
     }
 });
 
@@ -200,30 +211,48 @@ const upload = multer({
 
 app.post('/upload', isAuthenticated, (req, res) => {
     upload(req, res, async (err) => {
-        if (err) return res.render('index', { msg: err, user: req.user });
-        if (!req.file) return res.render('index', { msg: 'No file selected!', user: req.user });
+        if (err) {
+            console.error('Multer Error:', err); // Log the Multer error
+            return res.render('index', { msg: err, user: req.user });
+        }
+        if (!req.file) {
+            console.error('No file was uploaded');
+            return res.render('index', { msg: 'No file selected!', user: req.user });
+        }
 
         try {
+            // Check current AWS credentials
+            console.log('AWS Credentials:', {
+                accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+                secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+                sessionToken: process.env.AWS_SESSION_TOKEN,
+            });
+
             const s3Params = {
                 Bucket: process.env.S3_BUCKET_NAME,
                 Key: `videos/${req.file.originalname}`,
                 Body: req.file.buffer,
                 ContentType: req.file.mimetype,
             };
+            console.log('Uploading video to S3:', s3Params); // Log the S3 upload params
             await s3.send(new PutObjectCommand(s3Params));
 
+            // Store metadata in DynamoDB
             const dynamoParams = {
                 TableName: process.env.DYNAMODB_TABLE_NAME,
                 Item: {
-                    videoId: Date.now().toString(),
+                    videoId: Date.now().toString(),  // Unique ID for video
                     filename: req.file.originalname,
-                    userId: req.user.sub,
+                    userId: req.user.sub,  // Cognito User ID
+                    uploadTime: new Date().toISOString(),  // Include timestamp
                 },
             };
+            console.log('Saving metadata to DynamoDB:', dynamoParams); // Log the DynamoDB params
             await dynamoDB.send(new PutCommand(dynamoParams));
 
             res.render('index', { video: req.file.originalname, msg: 'Video uploaded successfully', user: req.user });
         } catch (error) {
+            console.error('Error uploading video or saving metadata:', error); // Log the full error
             res.status(500).send('Error uploading video');
         }
     });
@@ -258,19 +287,34 @@ app.get('/videos', isAuthenticated, async (req, res) => {
 // Process video route
 app.post('/process', isAuthenticated, (req, res) => {
     const { format, resolution, video } = req.body;
-    if (!format || !resolution || !video) return res.status(400).send('Format, resolution, or video file not specified.');
+
+    // Log the incoming data to see if it matches what you expect
+    console.log('Processing request body:', req.body);
+
+    if (!format || !resolution || !video) {
+        console.error('Format, resolution, or video not specified');
+        return res.status(400).send('Format, resolution, or video file not specified.');
+    }
 
     const output = `./videos/processed-${Date.now()}.${format}`;
     let scaleOption = '1920:1080';  // Default to 1080p
+
     if (resolution === '720p') scaleOption = '1280:720';
     if (resolution === '480p') scaleOption = '640:480';
 
+    console.log(`Converting video: ${video}, format: ${format}, resolution: ${resolution}`); // Log conversion info
     ffmpeg(`./videos/${video}`)
         .outputOptions(['-vf', `scale=${scaleOption}`])
         .toFormat(format)
         .output(output)
-        .on('end', () => res.download(output))
-        .on('error', (err) => res.status(500).send('Error processing video'))
+        .on('end', () => {
+            console.log('Video conversion completed:', output);  // Log successful conversion
+            res.download(output);
+        })
+        .on('error', (err) => {
+            console.error('Error processing video:', err);  // Log the ffmpeg error
+            res.status(500).send('Error processing video');
+        })
         .run();
 });
 
