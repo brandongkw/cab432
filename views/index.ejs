@@ -16,10 +16,10 @@
         <div class="navbar-links">
             <% if (user) { %>
                 <a href="/logout">Logout</a>
-            <% } else { %>
-                <a href="/login">Login</a>
-                <a href="/register">Register</a>
-            <% } %>
+                <% } else { %>
+                    <a href="/login">Login</a>
+                    <a href="/register">Register</a>
+                    <% } %>
         </div>
     </nav>
     <div class="youtube-search-container">
@@ -44,10 +44,14 @@
         <div class="video-display-wrapper">
             <h2>Uploaded Video:</h2>
             <video id="videoPlayer" controls>
-                <source id="videoSource" src="/videos/<%= video %>" type="video/mp4">
+                <% if (preview) { %>
+                    <source id="videoSource" src="<%= preview %>" type="video/mp4">
+                <% } else { %>
+                    <source id="videoSource" src="/videos/<%= video %>" type="video/mp4">
+                <% } %>
                 Your browser does not support the video tag.
             </video>
-        </div>
+        </div>        
 
         <div class="conversion-container">
             <h3>Convert to:</h3>
@@ -90,11 +94,13 @@
             })
                 .then(response => response.json())
                 .then(data => {
-                    videoSource.src = `/videos/${data.filename}`;
-                    videoPlayer.load();
+                    // Update the video player with the new uploaded video URL
+                    videoSource.src = data.preview;  // This should be the pre-signed URL
+                    videoPlayer.load();  // Reload the video player to reflect the new video
                 })
                 .catch(error => console.error('Error uploading video:', error));
         });
+
 
         document.getElementById('convertForm').addEventListener('submit', function (event) {
             event.preventDefault();
@@ -165,7 +171,7 @@
         // Setup WebSocket connection
         const ws = new WebSocket('ws://localhost:3000');
 
-        ws.onmessage = function(event) {
+        ws.onmessage = function (event) {
             const data = JSON.parse(event.data);
             if (data.progress !== undefined) {
                 progressBarFill.style.width = data.progress + '%';

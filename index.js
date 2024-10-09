@@ -11,12 +11,22 @@ const bcrypt = require('bcryptjs');
 const flash = require('connect-flash');
 const cookieParser = require('cookie-parser');
 const axios = require('axios');
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
-const { DynamoDBDocumentClient, PutCommand, QueryCommand } = require("@aws-sdk/lib-dynamodb");
-const WebSocket = require('ws');
-const { GetObjectCommand } = require("@aws-sdk/client-s3");
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const jwt = require('jsonwebtoken');
+const WebSocket = require('ws');
+const qutUsername = 'n11381345@qut.edu.au'
+
+// AWS SDK Imports
+const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb"); // Only import the base client
+const { DynamoDBDocumentClient, PutCommand, QueryCommand } = require("@aws-sdk/lib-dynamodb"); // Document client for simpler usage
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+
+// AWS DynamoDB and S3 Setup
+const client = new DynamoDBClient({});
+const docClient = DynamoDBDocumentClient.from(client);
+const s3 = new S3Client({ region: process.env.AWS_REGION });
+
+console.log('AWS Credentials:', s3.config.credentials);
 
 // AWS Cognito setup
 const AWS = require('aws-sdk');
@@ -29,16 +39,11 @@ const verifier = CognitoJwtVerifier.create({
     tokenUse: 'id',
 });
 
-// AWS S3 and DynamoDB setup
 AWS.config.update({
     accessKeyId: process.env.AWS_ACCESS_KEY_ID,
     secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
     region: process.env.AWS_REGION,
 });
-
-const s3 = new S3Client({ region: process.env.AWS_REGION });
-const dynamoDB = DynamoDBDocumentClient.from(new AWS.DynamoDB());
-console.log('AWS Credentials:', s3.config.credentials);
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -157,7 +162,7 @@ app.post('/login', async (req, res) => {
 
         // Redirect to homepage after successful login
         res.redirect('/');
-        
+
     } catch (error) {
         // Handle login error
         console.error('Login Error:', error);
@@ -221,48 +226,44 @@ const upload = multer({
 app.post('/upload', isAuthenticated, (req, res) => {
     upload(req, res, async (err) => {
         if (err) {
-            console.error('Multer Error:', err); // Log the Multer error
-            return res.render('index', { msg: err, user: req.user });
+            console.error('Multer Error:', err);
+            return res.render('index', { video: null, preview: null, msg: err, user: req.user });
         }
         if (!req.file) {
             console.error('No file was uploaded');
-            return res.render('index', { msg: 'No file selected!', user: req.user });
+            return res.render('index', { video: null, preview: null, msg: 'No file selected!', user: req.user });
         }
 
         try {
-            // Check current AWS credentials
-            console.log('AWS Credentials:', {
-                accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-                secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-                sessionToken: process.env.AWS_SESSION_TOKEN,
-            });
-
+            // S3 Upload
             const s3Params = {
                 Bucket: process.env.S3_BUCKET_NAME,
                 Key: `videos/${req.file.originalname}`,
                 Body: req.file.buffer,
                 ContentType: req.file.mimetype,
             };
-            console.log('Uploading video to S3:', s3Params); // Log the S3 upload params
             await s3.send(new PutObjectCommand(s3Params));
 
-            // Store metadata in DynamoDB
-            const dynamoParams = {
-                TableName: process.env.DYNAMODB_VIDEOS_TABLE,
-                Item: {
-                    videoId: Date.now().toString(),  // Unique ID for video
-                    filename: req.file.originalname,
-                    userId: req.user.sub,  // Cognito User ID
-                    uploadTime: new Date().toISOString(),  // Include timestamp
-                },
-            };
-            console.log('Saving metadata to DynamoDB:', dynamoParams); // Log the DynamoDB params
-            await dynamoDB.send(new PutCommand(dynamoParams));
+            // Generate a pre-signed URL for video playback
+            const preSignedUrl = await generatePreSignedUrl(req.file.originalname);
 
-            res.render('index', { video: req.file.originalname, msg: 'Video uploaded successfully', user: req.user });
+            // Store metadata in DynamoDB
+            const command = new PutCommand({
+                TableName: process.env.DYNAMODB_TABLE_NAME,
+                Item: {
+                    'qut-username': qutUsername,
+                    videoId: Date.now().toString(),
+                    filename: req.file.originalname,
+                    uploadTime: new Date().toISOString(),
+                },
+            });
+            await docClient.send(command);
+
+            // Render the page and include the pre-signed video URL for playback
+            res.render('index', { video: req.file.originalname, msg: 'Video uploaded successfully', preview: preSignedUrl, user: req.user });
         } catch (error) {
-            console.error('Error uploading video or saving metadata:', error); // Log the full error
-            res.status(500).send('Error uploading video');
+            console.error('Error uploading video or saving metadata:', error);
+            res.render('index', { video: null, preview: null, msg: 'Error uploading video', user: req.user });
         }
     });
 });
@@ -271,7 +272,7 @@ app.post('/upload', isAuthenticated, (req, res) => {
 // When fetching videos, generates the pre-signed URL to fetch the video from S3
 app.get('/videos', isAuthenticated, async (req, res) => {
     const params = {
-        TableName: process.env.DYNAMODB_VIDEOS_TABLE,
+        TableName: process.env.DYNAMODB_TABLE_NAME,
         KeyConditionExpression: 'userId = :userId',
         ExpressionAttributeValues: { ':userId': req.user.sub },
     };
@@ -296,34 +297,19 @@ app.get('/videos', isAuthenticated, async (req, res) => {
 // Process video route
 app.post('/process', isAuthenticated, (req, res) => {
     const { format, resolution, video } = req.body;
-
-    // Log the incoming data to see if it matches what you expect
-    console.log('Processing request body:', req.body);
-
-    if (!format || !resolution || !video) {
-        console.error('Format, resolution, or video not specified');
-        return res.status(400).send('Format, resolution, or video file not specified.');
-    }
+    if (!format || !resolution || !video) return res.status(400).send('Format, resolution, or video file not specified.');
 
     const output = `./videos/processed-${Date.now()}.${format}`;
     let scaleOption = '1920:1080';  // Default to 1080p
-
     if (resolution === '720p') scaleOption = '1280:720';
     if (resolution === '480p') scaleOption = '640:480';
 
-    console.log(`Converting video: ${video}, format: ${format}, resolution: ${resolution}`); // Log conversion info
     ffmpeg(`./videos/${video}`)
         .outputOptions(['-vf', `scale=${scaleOption}`])
         .toFormat(format)
         .output(output)
-        .on('end', () => {
-            console.log('Video conversion completed:', output);  // Log successful conversion
-            res.download(output);
-        })
-        .on('error', (err) => {
-            console.error('Error processing video:', err);  // Log the ffmpeg error
-            res.status(500).send('Error processing video');
-        })
+        .on('end', () => res.download(output))
+        .on('error', (err) => res.status(500).send('Error processing video'))
         .run();
 });
 
