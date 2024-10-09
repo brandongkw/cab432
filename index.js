@@ -16,6 +16,7 @@ const { DynamoDBDocumentClient, PutCommand, QueryCommand } = require("@aws-sdk/l
 const WebSocket = require('ws');
 const { GetObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
+const jwt = require('jsonwebtoken');
 
 // AWS Cognito setup
 const AWS = require('aws-sdk');
@@ -133,30 +134,38 @@ app.post('/login', async (req, res) => {
         AuthParameters: { USERNAME: username, PASSWORD: password }
     };
     try {
+        // Initiate authentication using AWS Cognito
         const data = await CognitoIdentityServiceProvider.initiateAuth(params).promise();
         const { IdToken, AccessToken } = data.AuthenticationResult;
 
-        // Store the new tokens as cookies or in session storage
+        // Decode the JWT token before responding to avoid async issues
+        const tokenPayload = jwt.decode(IdToken);
+        console.log("Token expires at:", new Date(tokenPayload.exp * 1000));
+
+        // Set cookies with the tokens (IdToken and AccessToken)
         res.cookie('jwt', IdToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             maxAge: 3600000  // Token valid for 1 hour
         });
 
-        // Optionally store access token if needed
         res.cookie('access_token', AccessToken, {
             httpOnly: true,
             secure: process.env.NODE_ENV === 'production',
             maxAge: 3600000  // Token valid for 1 hour
         });
 
+        // Redirect to homepage after successful login
         res.redirect('/');
-
-        const tokenPayload = jwt.decode(IdToken); // jwt.decode will extract token details
-        console.log("Token expires at:", new Date(tokenPayload.exp * 1000)); // Token expiry time in human-readable format
+        
     } catch (error) {
+        // Handle login error
         console.error('Login Error:', error);
-        res.render('login', { message: 'Invalid login credentials.' });
+
+        // Make sure to render the login page with an error message
+        if (!res.headersSent) {
+            res.render('login', { message: 'Invalid login credentials.' });
+        }
     }
 });
 
