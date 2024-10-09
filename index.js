@@ -239,7 +239,7 @@ app.post('/upload', isAuthenticated, (req, res) => {
 
             // Store metadata in DynamoDB
             const dynamoParams = {
-                TableName: process.env.DYNAMODB_TABLE_NAME,
+                TableName: process.env.DYNAMODB_VIDEOS_TABLE,
                 Item: {
                     videoId: Date.now().toString(),  // Unique ID for video
                     filename: req.file.originalname,
@@ -262,7 +262,7 @@ app.post('/upload', isAuthenticated, (req, res) => {
 // When fetching videos, generates the pre-signed URL to fetch the video from S3
 app.get('/videos', isAuthenticated, async (req, res) => {
     const params = {
-        TableName: process.env.DYNAMODB_TABLE_NAME,
+        TableName: process.env.DYNAMODB_VIDEOS_TABLE,
         KeyConditionExpression: 'userId = :userId',
         ExpressionAttributeValues: { ':userId': req.user.sub },
     };
