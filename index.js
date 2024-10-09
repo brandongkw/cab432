@@ -150,10 +150,10 @@ app.post('/login', async (req, res) => {
             maxAge: 3600000  // Token valid for 1 hour
         });
 
+        res.redirect('/');
+
         const tokenPayload = jwt.decode(IdToken); // jwt.decode will extract token details
         console.log("Token expires at:", new Date(tokenPayload.exp * 1000)); // Token expiry time in human-readable format
-
-        res.redirect('/');
     } catch (error) {
         console.error('Login Error:', error);
         res.render('login', { message: 'Invalid login credentials.' });
