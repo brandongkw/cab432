@@ -46,12 +46,12 @@
             <video id="videoPlayer" controls>
                 <% if (preview) { %>
                     <source id="videoSource" src="<%= preview %>" type="video/mp4">
-                <% } else { %>
-                    <source id="videoSource" src="/videos/<%= video %>" type="video/mp4">
-                <% } %>
-                Your browser does not support the video tag.
+                    <% } else { %>
+                        <source id="videoSource" src="/videos/<%= video %>" type="video/mp4">
+                        <% } %>
+                            Your browser does not support the video tag.
             </video>
-        </div>        
+        </div>
 
         <div class="conversion-container">
             <h3>Convert to:</h3>
@@ -121,12 +121,24 @@
     </script>
 
     <h2>Your Uploaded Videos</h2>
-    <ul id="video-list"></ul>
+    <ul>
+        <% if (videos && videos.length> 0) { %>
+            <% videos.forEach(function(video) { %>
+                <li>
+                    <h4>
+                        <%= video.filename %>
+                    </h4>
+                    <video controls width="600">
+                        <source src="<%= video.url %>" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                </li>
+                <% }); %>
+                    <% } else { %>
+                        <p>No videos uploaded yet.</p>
+                        <% } %>
+    </ul>
 
-    <!-- <div class="progress-bar">
-      </div> >
-    <div class="progress-bar-fill" id="progress-bar-fill"></div>
-</div-->
 
     <script>
         // Fetch and display videos

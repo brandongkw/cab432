@@ -273,8 +273,13 @@ app.post('/upload', isAuthenticated, (req, res) => {
 app.get('/videos', isAuthenticated, async (req, res) => {
     const params = {
         TableName: process.env.DYNAMODB_TABLE_NAME,
-        KeyConditionExpression: 'userId = :userId',
-        ExpressionAttributeValues: { ':userId': req.user.sub },
+        KeyConditionExpression: '#partitionKey = :username',
+        ExpressionAttributeNames: {
+            '#partitionKey': 'qut-username',  // Partition key in DynamoDB
+        },
+        ExpressionAttributeValues: {
+            ':username': qutUsername,  // Dynamically get the user's qut-username
+        },
     };
 
     try {
@@ -287,9 +292,11 @@ app.get('/videos', isAuthenticated, async (req, res) => {
                 return { ...video, url };
             })
         );
-
+        
+        // Render the index page with the list of videos and their pre-signed URLs
         res.render('index', { videos: videosWithUrls, user: req.user });
     } catch (error) {
+        console.error('Error fetching videos:', error);
         res.status(500).send('Error fetching videos');
     }
 });
