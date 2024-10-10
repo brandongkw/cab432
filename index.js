@@ -227,15 +227,14 @@ app.post('/upload', isAuthenticated, (req, res) => {
     upload(req, res, async (err) => {
         if (err) {
             console.error('Multer Error:', err);
-            return res.render('index', { video: null, preview: null, msg: err, user: req.user });
+            return res.status(400).json({ message: 'Error uploading video', error: err });
         }
         if (!req.file) {
-            console.error('No file was uploaded');
-            return res.render('index', { video: null, preview: null, msg: 'No file selected!', user: req.user });
+            return res.status(400).json({ message: 'No file selected!' });
         }
 
         try {
-            // S3 Upload
+            // S3 Upload logic
             const s3Params = {
                 Bucket: process.env.S3_BUCKET_NAME,
                 Key: `videos/${req.file.originalname}`,
@@ -244,10 +243,10 @@ app.post('/upload', isAuthenticated, (req, res) => {
             };
             await s3.send(new PutObjectCommand(s3Params));
 
-            // Generate a pre-signed URL for video playback
+            // Generate pre-signed URL for playback
             const preSignedUrl = await generatePreSignedUrl(req.file.originalname);
 
-            // Store metadata in DynamoDB
+            // DynamoDB logic
             const command = new PutCommand({
                 TableName: process.env.DYNAMODB_TABLE_NAME,
                 Item: {
@@ -259,11 +258,14 @@ app.post('/upload', isAuthenticated, (req, res) => {
             });
             await docClient.send(command);
 
-            // Render the page and include the pre-signed video URL for playback
-            res.render('index', { video: req.file.originalname, msg: 'Video uploaded successfully', preview: preSignedUrl, user: req.user });
+            // Return JSON response
+            res.json({
+                preview: preSignedUrl,
+                message: 'Video uploaded successfully'
+            });
         } catch (error) {
             console.error('Error uploading video or saving metadata:', error);
-            res.render('index', { video: null, preview: null, msg: 'Error uploading video', user: req.user });
+            res.status(500).json({ message: 'Error uploading video', error });
         }
     });
 });
@@ -304,13 +306,82 @@ app.post('/process', isAuthenticated, (req, res) => {
     if (resolution === '720p') scaleOption = '1280:720';
     if (resolution === '480p') scaleOption = '640:480';
 
-    ffmpeg(`./videos/${video}`)
-        .outputOptions(['-vf', `scale=${scaleOption}`])
-        .toFormat(format)
-        .output(output)
-        .on('end', () => res.download(output))
-        .on('error', (err) => res.status(500).send('Error processing video'))
-        .run();
+    // Define the path to download the video from S3
+    const s3Params = {
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: `videos/${video}`,  // Ensure this points to the correct video file in S3
+    };
+
+    try {
+        // Download the video from S3
+        const command = new GetObjectCommand(s3Params);
+        const data = await s3.send(command);
+
+        // Write the video to a local file
+        const localVideoPath = `./videos/${video}`;
+        const stream = fs.createWriteStream(localVideoPath);
+        data.Body.pipe(stream);
+
+        // Wait until the file is fully written
+        stream.on('finish', () => {
+            // Start processing the video with ffmpeg
+            ffmpeg(localVideoPath)
+                .outputOptions(['-vf', `scale=${scaleOption}`])
+                .toFormat(format)
+                .output(output)
+                .on('end', () => {
+                    console.log('Video processing complete');
+                    res.download(output);  // Serve the processed video file
+                })
+                .on('error', (err) => {
+                    console.error('Error processing video:', err);
+                    res.status(500).send('Error processing video');
+                })
+                .run();
+        });
+
+        // Handle error during file writing
+        stream.on('error', (err) => {
+            console.error('Error writing file:', err);
+            res.status(500).send('Error writing video file');
+        });
+    } catch (error) {
+        console.error('Error downloading video from S3:', error);
+        res.status(500).send('Error downloading video from S3');
+    }
+});
+
+app.delete('/delete-video/:filename', isAuthenticated, async (req, res) => {
+    const { filename } = req.params;
+
+    try {
+        // Delete video from S3
+        const deleteParams = {
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: `videos/${filename}`
+        };
+        await s3.send(new DeleteObjectCommand(deleteParams));
+
+        // Delete metadata from DynamoDB
+        const deleteDynamoParams = {
+            TableName: process.env.DYNAMODB_TABLE_NAME,
+            Key: {
+                'qut-username': qutUsername,
+                'filename': filename
+            }
+        };
+        await docClient.send(new DeleteCommand(deleteDynamoParams));
+
+        res.status(200).send('Video deleted successfully');
+    } catch (error) {
+        console.error('Error deleting video:', error);
+        res.status(500).send('Error deleting video');
+    }
+});
+
+// Health-check route
+app.get('/health-check', (req, res) => {
+    res.status(200).send('Server is healthy');
 });
 
 // Global error handler

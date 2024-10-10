@@ -32,12 +32,19 @@
         <div class="file-upload-wrapper">
             <form id="uploadForm" action="/upload" method="POST" enctype="multipart/form-data">
                 <label class="custom-file-upload">
-                    <input type="file" name="videoFile" accept="video/*" required
+                    <input type="file" name="videoFile" id="fileInput" accept="video/*" required
                         onchange="document.getElementById('file-chosen').textContent = this.files[0].name" />
                     Choose File
                 </label>
                 <span id="file-chosen">No file chosen</span>
                 <button type="submit">Upload Video</button>
+
+                <div class="progress-bar" id="progressContainer" style="display: none;">
+                    <div id="progress-bar-fill"></div>
+                </div>
+
+                <div id="uploadStatus" style="display: none;">Uploading...</div>
+
             </form>
         </div>
 
@@ -46,17 +53,17 @@
             <video id="videoPlayer" controls>
                 <% if (preview) { %>
                     <source id="videoSource" src="<%= preview %>" type="video/mp4">
-                <% } else { %>
-                    <source id="videoSource" src="/videos/<%= video %>" type="video/mp4">
-                <% } %>
-                Your browser does not support the video tag.
+                    <% } else { %>
+                        <source id="videoSource" src="/videos/<%= video %>" type="video/mp4">
+                        <% } %>
+                            Your browser does not support the video tag.
             </video>
-        </div>        
+        </div>
 
         <div class="conversion-container">
             <h3>Convert to:</h3>
             <form action="/process" method="POST">
-                <input type="hidden" name="video" value="<%= video %>">
+                <input type="hidden" name="video" value="<%= video ? video : '' %>">
                 <label for="format">Format:</label>
                 <select name="format" id="format">
                     <option value="mp4">MP4</option>
@@ -73,54 +80,122 @@
             </form>
         </div>
     </div>
+
     <script>
         const fileInput = document.getElementById('fileInput');
-        const fileName = document.getElementById('fileName');
-        const uploadButton = document.getElementById('uploadButton');
+        const fileNameDisplay = document.getElementById('file-chosen');
         const videoPlayer = document.getElementById('videoPlayer');
         const videoSource = document.getElementById('videoSource');
+        const uploadStatus = document.getElementById('uploadStatus');
+        const progressContainer = document.getElementById('progressContainer');
 
         fileInput.addEventListener('change', () => {
-            fileName.textContent = fileInput.files[0].name;
+            fileNameDisplay.textContent = fileInput.files[0].name;
         });
 
-        uploadButton.addEventListener('click', () => {
+        document.getElementById('uploadForm').addEventListener('submit', function (event) {
+            event.preventDefault();  // Prevent the default form submission
+
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];  // Get the file from the input
+
+            if (!file) {
+                alert('No file selected.');
+                return;
+            }
+
+            uploadFileWithProgress(file);  // Call the function to handle the upload
+        });
+
+        function uploadFileWithProgress(file) {
+            const xhr = new XMLHttpRequest();
             const formData = new FormData();
-            formData.append('videoFile', fileInput.files[0]);
+            formData.append('videoFile', file);
 
-            fetch('/upload', {
-                method: 'POST',
-                body: formData
-            })
-                .then(response => response.json())
-                .then(data => {
-                    // Update the video player with the new uploaded video URL
-                    videoSource.src = data.preview;  // This should be the pre-signed URL
-                    videoPlayer.load();  // Reload the video player to reflect the new video
-                })
-                .catch(error => console.error('Error uploading video:', error));
-        });
+            // Show progress bar and reset it
+            const progressContainer = document.getElementById('progressContainer');
+            progressContainer.style.display = 'block';
+            document.getElementById('progress-bar-fill').style.width = '0%';
 
+            xhr.open('POST', '/upload', true);
 
-        document.getElementById('convertForm').addEventListener('submit', function (event) {
-            event.preventDefault();
+            // Update progress bar during upload
+            xhr.upload.onprogress = function (event) {
+                if (event.lengthComputable) {
+                    const percentComplete = (event.loaded / event.total) * 100;
+                    document.getElementById('progress-bar-fill').style.width = percentComplete + '%';
+                }
+            };
 
-            const formData = new FormData(this);
-            formData.append('video', fileName.textContent);
+            // Simulate progress during server-side processing after upload is complete
+            xhr.onload = function () {
+                if (xhr.status === 200) {
+                    let simulatedProgress = 100;
+                    const simulateProgressInterval = setInterval(() => {
+                        if (simulatedProgress < 120) {
+                            simulatedProgress += 2; // Extend progress by small increments
+                            document.getElementById('progress-bar-fill').style.width = `${simulatedProgress}%`;
+                        }
+                    }, 200); // Increase progress slowly after upload
 
-            fetch('/process', {
-                method: 'POST',
-                body: formData
-            })
-                .then(response => response.json())
-                .then(data => {
-                    window.location.href = `/download/${data.filename}`;
-                })
-                .catch(error => console.error('Error processing video:', error));
+                    try {
+                        const response = JSON.parse(xhr.responseText);
+                        // Update video preview with the new video
+                        const videoSource = document.getElementById('videoSource');
+                        videoSource.src = response.preview;  // Use the pre-signed URL from the response
+                        document.getElementById('videoPlayer').load();  // Reload the video player
+
+                        // Wait until the video is loaded before hiding the progress bar
+                        document.getElementById('videoPlayer').onloadeddata = function () {
+                            // Hide the progress bar and stop simulation
+                            clearInterval(simulateProgressInterval);
+                            progressContainer.style.display = 'none';
+                        };
+                    } catch (error) {
+                        clearInterval(simulateProgressInterval);
+                        console.error("Failed to parse JSON response:", error);
+                        console.log("Response was:", xhr.responseText);
+                        alert('Failed to upload video. Please try again.');
+                    }
+                } else {
+                    alert('Upload failed! Please try again.');
+                }
+            };
+
+            xhr.onerror = function () {
+                document.getElementById('progress-bar-fill').style.width = '0%'; // Reset on error
+                alert('Upload failed! Server might be down.');
+            };
+
+            xhr.send(formData);
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            progressContainer.style.display = 'none';  // Ensure progress bar is hidden initially
+            uploadStatus.style.display = 'none';  // Ensure upload status is hidden initially
         });
     </script>
 
     <h2>Your Uploaded Videos</h2>
+    <ul>
+        <% if (videos && videos.length> 0) { %>
+            <% videos.forEach(function(video) { %>
+                <li>
+                    <h4>
+                        <!-- Video filename clickable for preview -->
+                        <a href="#" onclick="previewVideo('<%= video.url %>')">
+                            <%= video.filename %>
+                        </a>
+                        <!-- Delete button for the video -->
+                        <button onclick="deleteVideo('<%= video.filename %>')">Delete</button>
+                    </h4>
+                </li>
+                <% }); %>
+                    <% } else { %>
+                        <p>No videos uploaded yet.</p>
+                        <% } %>
+    </ul>
+
     <ul id="video-list"></ul>
 
     <!-- <div class="progress-bar">
@@ -129,35 +204,71 @@
 </div-->
 
     <script>
-        // Fetch and display videos
-        fetch('/api/videos')
-            .then(response => response.json())
-            .then(videos => {
-                const videoList = document.getElementById('video-list');
-                videos.forEach(video => {
-                    const li = document.createElement('li');
-                    li.textContent = video.filename;
-                    videoList.appendChild(li);
+        // WebSocket reconnection logic
+        let socket;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+        const reconnectDelay = 5000;  // 5 seconds delay for reconnecting
 
-                    // Add delete button
-                    const deleteButton = document.createElement('button');
-                    deleteButton.textContent = 'Delete';
-                    deleteButton.onclick = () => deleteVideo(video._id);  // Using _id
-                    li.appendChild(deleteButton);
-                });
-            });
+        function connectWebSocket() {
+            socket = new WebSocket('ws://localhost:3000');
 
-        function deleteVideo(id) {
-            fetch(`/api/videos/${id}`, { method: 'DELETE' })  // Using _id
-                .then(response => {
-                    if (response.ok) {
-                        alert('Video deleted');
-                    } else {
-                        alert('Failed to delete video');
-                    }
-                    location.reload();
-                })
-                .catch(error => console.error('Error deleting video:', error));
+            socket.onopen = () => {
+                console.log('WebSocket connected');
+                reconnectAttempts = 0;  // Reset attempts on successful connection
+            };
+
+            socket.onclose = () => {
+                console.log('WebSocket connection closed');
+                attemptReconnect();
+            };
+
+            socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                socket.close();  // Close the socket and trigger the reconnect logic
+            };
+        }
+
+        function attemptReconnect() {
+            if (reconnectAttempts < maxReconnectAttempts) {
+                reconnectAttempts++;
+                console.log(`Attempting to reconnect in ${reconnectDelay / 1000} seconds...`);
+                setTimeout(() => {
+                    connectWebSocket();
+                }, reconnectDelay);
+            } else {
+                console.log('Max reconnect attempts reached. Could not reconnect to WebSocket.');
+            }
+        }
+
+        // Initialize WebSocket connection on page load
+        connectWebSocket();
+
+        // Function to load the video into the main preview area
+        function previewVideo(videoUrl) {
+            const videoPlayer = document.getElementById('videoPlayer');
+            const videoSource = document.getElementById('videoSource');
+            videoSource.src = videoUrl;
+            videoPlayer.load();  // Reload the video player
+        }
+
+        // Function to handle video deletion
+        function deleteVideo(filename) {
+            if (confirm("Are you sure you want to delete this video?")) {
+                fetch(`/delete-video/${filename}`, { method: 'DELETE' })
+                    .then(response => {
+                        if (response.ok) {
+                            alert("Video deleted successfully.");
+                            location.reload();  // Reload the page to update the video list
+                        } else {
+                            alert("Error deleting video.");
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error deleting video:', error);
+                        alert("Error deleting video.");
+                    });
+            }
         }
 
         function checkStatus(id) {
@@ -165,18 +276,6 @@
                 .then(response => response.json())
                 .then(data => alert(`Status: ${data.status}`));
         }
-
-        const progressBarFill = document.getElementById('progress-bar-fill');
-
-        // Setup WebSocket connection
-        const ws = new WebSocket('ws://localhost:3000');
-
-        ws.onmessage = function (event) {
-            const data = JSON.parse(event.data);
-            if (data.progress !== undefined) {
-                progressBarFill.style.width = data.progress + '%';
-            }
-        };
     </script>
 
     <footer class="footer">
