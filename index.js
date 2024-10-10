@@ -12,6 +12,7 @@ const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
 const qutUsername = `n11381345@qut.edu.au`;
+const fs = require('fs');
 
 // AWS SDK Imports
 const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
@@ -349,7 +350,7 @@ app.get('/videos', isAuthenticated, async (req, res) => {
 });
 
 // Process video route
-app.post('/process', isAuthenticated, (req, res) => {
+app.post('/process', isAuthenticated, async (req, res) => {
     const { format, resolution, video } = req.body;
     if (!format || !resolution || !video) return res.status(400).send('Format, resolution, or video file not specified.');
 
@@ -358,13 +359,49 @@ app.post('/process', isAuthenticated, (req, res) => {
     if (resolution === '720p') scaleOption = '1280:720';
     if (resolution === '480p') scaleOption = '640:480';
 
-    ffmpeg(`./videos/${video}`)
-        .outputOptions(['-vf', `scale=${scaleOption}`])
-        .toFormat(format)
-        .output(output)
-        .on('end', () => res.download(output))
-        .on('error', (err) => res.status(500).send('Error processing video'))
-        .run();
+    // Define the path to download the video from S3
+    const s3Params = {
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: `videos/${video}`,  // Ensure this points to the correct video file in S3
+    };
+
+    try {
+        // Download the video from S3
+        const command = new GetObjectCommand(s3Params);
+        const data = await s3.send(command);
+        
+        // Write the video to a local file
+        const localVideoPath = `./videos/${video}`;
+        const stream = fs.createWriteStream(localVideoPath);
+        data.Body.pipe(stream);
+
+        // Wait until the file is fully written
+        stream.on('finish', () => {
+            // Start processing the video with ffmpeg
+            ffmpeg(localVideoPath)
+                .outputOptions(['-vf', `scale=${scaleOption}`])
+                .toFormat(format)
+                .output(output)
+                .on('end', () => {
+                    console.log('Video processing complete');
+                    res.download(output);  // Serve the processed video file
+                })
+                .on('error', (err) => {
+                    console.error('Error processing video:', err);
+                    res.status(500).send('Error processing video');
+                })
+                .run();
+        });
+
+        // Handle error during file writing
+        stream.on('error', (err) => {
+            console.error('Error writing file:', err);
+            res.status(500).send('Error writing video file');
+        });
+    } catch (error) {
+        console.error('Error downloading video from S3:', error);
+        res.status(500).send('Error downloading video from S3');
+    }
 });
 
 app.delete('/delete-video/:filename', isAuthenticated, async (req, res) => {
