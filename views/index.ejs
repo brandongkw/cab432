@@ -43,22 +43,19 @@
 
         <div class="video-display-wrapper">
             <h2>Uploaded Video:</h2>
-            <video id="videoPlayer" controls>
-                <% if (preview) { %>
-                    <source id="videoSource" src="<%= preview %>" type="video/mp4">
-                    <% } else if (video) { %>
-                        <source id="videoSource" src="/videos/<%= video %>" type="video/mp4">
-                        <% } else { %>
-                            <p>No video selected for preview.</p>
-                            <% } %>
-            </video>
+<video id="videoPlayer" controls>
+    <% if (preview) { %>
+        <source id="videoSource" src="<%= preview %>" type="video/mp4">
+    <% } else { %>
+        <p>No video selected for preview.</p>
+    <% } %>
+</video>
         </div>
 
         <div class="conversion-container">
             <h3>Convert to:</h3>
             <form action="/process" method="POST">
                 <input type="hidden" name="video" value="<%= video ? video : '' %>">
-                <!-- Ensure video has a default value -->
                 <label for="format">Format:</label>
                 <select name="format" id="format">
                     <option value="mp4">MP4</option>
@@ -73,7 +70,6 @@
                 </select>
                 <button type="submit">Convert Video</button>
             </form>
-
         </div>
     </div>
     <script>
@@ -123,25 +119,31 @@
         });
     </script>
 
-    <h2>Your Uploaded Videos</h2>
-    <ul>
-        <% if (videos && videos.length> 0) { %>
-            <% videos.forEach(function(video) { %>
-                <li>
-                    <h4>
-                        <!-- Video filename clickable for preview -->
-                        <a href="#" onclick="previewVideo('<%= video.url %>')">
-                            <%= video.filename %>
-                        </a>
-                        <!-- Delete button for the video -->
-                        <button onclick="deleteVideo('<%= video.filename %>')">Delete</button>
-                    </h4>
-                </li>
-                <% }); %>
-                    <% } else { %>
-                        <p>No videos uploaded yet.</p>
-                        <% } %>
-    </ul>
+<h2>Your Uploaded Videos</h2>
+<ul>
+    <% if (videos && videos.length > 0) { %>
+        <% videos.forEach(function(video) { %>
+            <li>
+                <h4><%= video.filename %></h4>
+
+                <!-- Preview button -->
+                <form action="/preview-video" method="POST" style="display:inline;">
+                    <input type="hidden" name="videoUrl" value="<%= video.url %>">
+                    <button type="submit">Preview</button>
+                </form>
+
+                <!-- Delete button -->
+                <form action="/delete-video" method="POST" style="display:inline;">
+                    <input type="hidden" name="filename" value="<%= video.filename %>">
+                    <button type="submit">Delete</button>
+                </form>
+            </li>
+        <% }); %>
+    <% } else { %>
+        <p>No videos uploaded yet.</p>
+    <% } %>
+</ul>
+
     <script>
         // Fetch and display videos
         fetch('/api/videos')

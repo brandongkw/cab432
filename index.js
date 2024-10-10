@@ -148,19 +148,32 @@ async function getUploadedVideos(user) {
 
 // Landing Page Route
 app.get('/', isAuthenticated, async (req, res) => {
-    try {
-        const videosWithUrls = await getUploadedVideos(req.user);
-        const firstVideo = videosWithUrls.length > 0 ? videosWithUrls[0] : null;
 
-        res.render('index', {
-            user: req.user,
-            videos: videosWithUrls,
-            video: firstVideo ? firstVideo.filename : null,
-            preview: firstVideo ? firstVideo.url : null,
-            msg: '',
-        });
+    const params = {
+        TableName: process.env.DYNAMODB_TABLE_NAME,
+        KeyConditionExpression: '#partitionKey = :username',
+        ExpressionAttributeNames: {
+            '#partitionKey': 'qut-username',
+        },
+        ExpressionAttributeValues: { ':username': qutUsername },
+    };
+    
+    try {
+        const data = await docClient.send(new QueryCommand(params));
+
+        // Generate pre-signed URLs for each video
+        const videosWithUrls = await Promise.all(
+            data.Items.map(async (video) => {
+                const url = await generatePreSignedUrl(video.filename);
+                return { ...video, url };
+            })
+        );
+
+        // Render the page with videos and allow previewing
+        res.render('index', { videos: videosWithUrls, preview: null, user: req.user, video: null });
     } catch (error) {
-        res.render('index', { user: req.user, videos: [], video: null, preview: null, msg: 'Error loading videos' });
+        console.error('Error fetching videos:', error);
+        res.status(500).send('Error fetching videos');
     }
 });
 
@@ -318,36 +331,54 @@ app.post('/upload', isAuthenticated, (req, res) => {
 // Get uploaded videos for the user
 // When fetching videos, generates the pre-signed URL to fetch the video from S3
 app.get('/videos', isAuthenticated, async (req, res) => {
-    const params = {
-        TableName: process.env.DYNAMODB_TABLE_NAME,
-        KeyConditionExpression: '#partitionKey = :username',
-        ExpressionAttributeNames: {
-            '#partitionKey': 'qut-username',  // Partition key in DynamoDB
-        },
-        ExpressionAttributeValues: {
-            ':username': qutUsername,  // Dynamically get the user's qut-username
-        },
-    };
 
     try {
-        const data = await docClient.send(new QueryCommand(params));
+        // Fetch video metadata from DynamoDB
+        const dynamoParams = {
+            TableName: process.env.DYNAMODB_TABLE_NAME,
+            KeyConditionExpression: '#partitionKey = :username',
+            ExpressionAttributeNames: {
+                '#partitionKey': 'qut-username',
+            },
+            ExpressionAttributeValues: {
+                ':username': qutUsername,
+            },
+        };
 
-        if (data.Items && data.Items.length > 0) {
-            videosWithUrls = await Promise.all(
-                data.Items.map(async (video) => {
-                    const url = await generatePreSignedUrl(video.filename);
-                    return { ...video, url };  // Attach the signed URL to the video object
-                })
-            );
-        }
+        const dynamoData = await docClient.send(new QueryCommand(dynamoParams));
 
-        // Ensure you pass videos (even if empty)
-        res.render('index', { user: req.user, videos: videosWithUrls, preview: null });
+        // Generate pre-signed URLs for each video
+        const videosWithUrls = await Promise.all(
+            dynamoData.Items.map(async (video) => {
+                const url = await generatePreSignedUrl(video.filename);
+                return { filename: video.filename, url };
+            })
+        );
+
+        // Render the page with videos list
+        res.render('index', {
+            videos: videosWithUrls,
+            user: req.user,
+            preview: null,  // No initial video selected for preview
+            msg: '',
+            video: ''
+        });
+
     } catch (error) {
-        console.error('Error fetching videos:', error);
-        res.render('index', { user: req.user, videos: [], preview: null, msg: 'Error fetching videos' });
+        console.error('Error fetching videos from DynamoDB:', error);
+        res.status(500).send('Error fetching videos');
     }
 });
+
+// Function to generate pre-signed URL for video playback
+async function generatePreSignedUrl(filename) {
+    const s3Params = {
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: `videos/${filename}`,
+    };
+    const command = new GetObjectCommand(s3Params);
+    return await getSignedUrl(s3, command, { expiresIn: 3600 });  // 1 hour URL
+}
 
 // Process video route
 app.post('/process', isAuthenticated, async (req, res) => {
@@ -404,34 +435,79 @@ app.post('/process', isAuthenticated, async (req, res) => {
     }
 });
 
-app.delete('/delete-video/:filename', isAuthenticated, async (req, res) => {
-    const { filename } = req.params;
+// Delete video from both S3 and DynamoDB
+app.post('/delete-video', isAuthenticated, async (req, res) => {
+    const { filename } = req.body;
 
     try {
-        // Delete video from S3
-        const deleteParams = {
+        // Delete from S3
+        const s3Params = {
             Bucket: process.env.S3_BUCKET_NAME,
-            Key: `videos/${filename}`
+            Key: `videos/${filename}`,
         };
-        await s3.send(new DeleteObjectCommand(deleteParams));
+        await s3.send(new DeleteObjectCommand(s3Params));
 
         // Delete metadata from DynamoDB
-        const deleteDynamoParams = {
+        const dynamoParams = {
             TableName: process.env.DYNAMODB_TABLE_NAME,
             Key: {
                 'qut-username': qutUsername,
                 'filename': filename
             }
         };
-        await docClient.send(new DeleteCommand(deleteDynamoParams));
+        await docClient.send(new DeleteCommand(dynamoParams));
 
-        res.status(200).send('Video deleted successfully');
+        res.redirect('/videos');
     } catch (error) {
         console.error('Error deleting video:', error);
         res.status(500).send('Error deleting video');
     }
 });
 
+// Preview a selected video
+app.post('/preview-video', isAuthenticated, (req, res) => {
+    const { videoUrl } = req.body;
+
+    try {
+        // Fetch videos again from DynamoDB to render the list
+        const dynamoParams = {
+            TableName: process.env.DYNAMODB_TABLE_NAME,
+            KeyConditionExpression: '#partitionKey = :username',
+            ExpressionAttributeNames: {
+                '#partitionKey': 'qut-username',
+            },
+            ExpressionAttributeValues: {
+                ':username': qutUsername,
+            },
+        };
+
+        docClient.send(new QueryCommand(dynamoParams))
+            .then(async (dynamoData) => {
+                const videosWithUrls = await Promise.all(
+                    dynamoData.Items.map(async (video) => {
+                        const url = await generatePreSignedUrl(video.filename);
+                        return { filename: video.filename, url };
+                    })
+                );
+
+                // Render the page with the selected video preview
+                res.render('index', {
+                    videos: videosWithUrls,  // List of user's videos
+                    preview: videoUrl,  // Set the selected video for preview
+                    user: req.user,
+                    msg: '',
+                    video: ''
+                });
+            })
+            .catch((error) => {
+                console.error('Error fetching videos:', error);
+                res.status(500).send('Error fetching videos');
+            });
+    } catch (error) {
+        console.error('Error processing preview:', error);
+        res.status(500).send('Error processing preview');
+    }
+});
 
 // Global error handler
 app.use((err, req, res, next) => {
