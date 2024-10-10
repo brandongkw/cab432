@@ -40,7 +40,9 @@
                 <button type="submit">Upload Video</button>
 
                 <div class="progress-bar" id="progressContainer" style="display: none;">
-                    <div id="progress-bar-fill"></div>
+                    <div id="progress-bar-fill"
+                        style="width: 0%; height: 10px; background-color: green; border: 1px solid #000; border-radius: 5px;">
+                    </div>
                 </div>
 
                 <div id="uploadStatus" style="display: none;">Uploading...</div>
@@ -53,10 +55,10 @@
             <video id="videoPlayer" controls>
                 <% if (preview) { %>
                     <source id="videoSource" src="<%= preview %>" type="video/mp4">
-                    <% } else { %>
+                    <% } else if (video) { %>
                         <source id="videoSource" src="/videos/<%= video %>" type="video/mp4">
                         <% } %>
-                            Your browser does not support the video tag.
+                            <p>Your browser does not support the video tag.</p>
             </video>
         </div>
 
@@ -78,6 +80,7 @@
                 </select>
                 <button type="submit">Convert Video</button>
             </form>
+
         </div>
     </div>
 
@@ -163,7 +166,8 @@
             };
 
             xhr.onerror = function () {
-                document.getElementById('progress-bar-fill').style.width = '0%'; // Reset on error
+                document.getElementById('progress-bar-fill').style.width = '0%';  // Reset progress on error
+                progressContainer.style.display = 'none';  // Hide the progress container on error
                 alert('Upload failed! Server might be down.');
             };
 
@@ -195,13 +199,6 @@
                         <p>No videos uploaded yet.</p>
                         <% } %>
     </ul>
-
-    <ul id="video-list"></ul>
-
-    <!-- <div class="progress-bar">
-      </div> >
-    <div class="progress-bar-fill" id="progress-bar-fill"></div>
-</div-->
 
     <script>
         // WebSocket reconnection logic

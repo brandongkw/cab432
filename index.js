@@ -5,7 +5,6 @@ const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('ffmpeg-static');
 const path = require('path');
-const fs = require('fs');
 const session = require('express-session');
 const bcrypt = require('bcryptjs');
 const flash = require('connect-flash');
@@ -13,18 +12,19 @@ const cookieParser = require('cookie-parser');
 const axios = require('axios');
 const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
-const qutUsername = 'n11381345@qut.edu.au'
+const qutUsername = 'n11381345@qut.edu.au';
+const fs = require('fs');
 
 // AWS SDK Imports
-const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3");
-const { DynamoDBClient } = require("@aws-sdk/client-dynamodb"); // Only import the base client
-const { DynamoDBDocumentClient, PutCommand, QueryCommand } = require("@aws-sdk/lib-dynamodb"); // Document client for simpler usage
+const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
+const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
+const { DynamoDBDocumentClient, QueryCommand, PutCommand, DeleteCommand } = require("@aws-sdk/lib-dynamodb");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 
-// AWS DynamoDB and S3 Setup
-const client = new DynamoDBClient({});
-const docClient = DynamoDBDocumentClient.from(client);
+// AWS Setup
 const s3 = new S3Client({ region: process.env.AWS_REGION });
+const dynamoDBClient = new DynamoDBClient({ region: process.env.AWS_REGION });
+const docClient = DynamoDBDocumentClient.from(dynamoDBClient);
 
 console.log('AWS Credentials:', s3.config.credentials);
 
@@ -121,9 +121,48 @@ async function generatePreSignedUrl(filename) {
     return signedUrl;
 }
 
-// Route for main page (requires authentication)
-app.get('/', isAuthenticated, (req, res) => {
-    res.render('index', { video: null, preview: null, msg: '', user: req.user });
+// Fetching videos for a user
+async function getUploadedVideos(user) {
+    try {
+        const params = {
+            TableName: process.env.DYNAMODB_TABLE_NAME,
+            KeyConditionExpression: '#partitionKey = :username',
+            ExpressionAttributeNames: {
+                '#partitionKey': 'qut-username',
+            },
+            ExpressionAttributeValues: { ':username': qutUsername },
+        };
+        const data = await docClient.send(new QueryCommand(params));
+
+        if (data.Items.length > 0) {
+            return await Promise.all(data.Items.map(async (video) => {
+                const url = await generatePreSignedUrl(video.filename);
+                return { ...video, url };
+            }));
+        }
+        return [];
+    } catch (error) {
+        console.error('Error fetching videos:', error);
+        throw new Error('Error fetching videos');
+    }
+}
+
+// Landing Page Route
+app.get('/', isAuthenticated, async (req, res) => {
+    try {
+        const videosWithUrls = await getUploadedVideos(req.user);
+        const firstVideo = videosWithUrls.length > 0 ? videosWithUrls[0] : null;
+
+        res.render('index', {
+            user: req.user,
+            videos: videosWithUrls,
+            video: firstVideo ? firstVideo.filename : null,
+            preview: firstVideo ? firstVideo.url : null,
+            msg: '',
+        });
+    } catch (error) {
+        res.render('index', { user: req.user, videos: [], video: null, preview: null, msg: 'Error loading videos' });
+    }
 });
 
 // Login Route
@@ -275,29 +314,37 @@ app.post('/upload', isAuthenticated, (req, res) => {
 app.get('/videos', isAuthenticated, async (req, res) => {
     const params = {
         TableName: process.env.DYNAMODB_TABLE_NAME,
-        KeyConditionExpression: 'userId = :userId',
-        ExpressionAttributeValues: { ':userId': req.user.sub },
+        KeyConditionExpression: '#partitionKey = :username',
+        ExpressionAttributeNames: {
+            '#partitionKey': 'qut-username',  // Partition key in DynamoDB
+        },
+        ExpressionAttributeValues: {
+            ':username': qutUsername,  // Dynamically get the user's qut-username
+        },
     };
 
     try {
-        const data = await dynamoDB.send(new QueryCommand(params));
+        const data = await docClient.send(new QueryCommand(params));
 
-        // Generate pre-signed URLs for each video
-        const videosWithUrls = await Promise.all(
-            data.Items.map(async (video) => {
-                const url = await generatePreSignedUrl(video.filename);
-                return { ...video, url };
-            })
-        );
+        if (data.Items && data.Items.length > 0) {
+            videosWithUrls = await Promise.all(
+                data.Items.map(async (video) => {
+                    const url = await generatePreSignedUrl(video.filename);
+                    return { ...video, url };  // Attach the signed URL to the video object
+                })
+            );
+        }
 
-        res.render('index', { videos: videosWithUrls, user: req.user });
+        // Ensure you pass videos (even if empty)
+        res.render('index', { user: req.user, videos: videosWithUrls, preview: null });
     } catch (error) {
-        res.status(500).send('Error fetching videos');
+        console.error('Error fetching videos:', error);
+        res.render('index', { user: req.user, videos: [], preview: null, msg: 'Error fetching videos' });
     }
 });
 
 // Process video route
-app.post('/process', isAuthenticated, (req, res) => {
+app.post('/process', isAuthenticated, async (req, res) => {
     const { format, resolution, video } = req.body;
     if (!format || !resolution || !video) return res.status(400).send('Format, resolution, or video file not specified.');
 
