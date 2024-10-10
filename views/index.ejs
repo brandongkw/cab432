@@ -55,41 +55,32 @@
             <video id="videoPlayer" controls>
                 <% if (preview) { %>
                     <source id="videoSource" src="<%= preview %>" type="video/mp4">
-                    <% } else { %>
-                        <p>No video selected for preview.</p>
+                    <% } else if (video) { %>
+                        <source id="videoSource" src="/videos/<%= video %>" type="video/mp4">
                         <% } %>
+                            <p>Your browser does not support the video tag.</p>
             </video>
         </div>
-        <video id="videoPlayer" controls>
-            <% if (preview) { %>
-                <source id="videoSource" src="<%= preview %>" type="video/mp4">
-                <% } else if (video) { %>
-                    <source id="videoSource" src="/videos/<%= video %>" type="video/mp4">
-                    <% } %>
-                        <p>Your browser does not support the video tag.</p>
-        </video>
-    </div>
 
-    <div class="conversion-container">
-        <h3>Convert to:</h3>
-        <form action="/process" method="POST">
-            <input type="hidden" name="video" value="<%= video ? video : '' %>">
-            <label for="format">Format:</label>
-            <select name="format" id="format">
-                <option value="mp4">MP4</option>
-                <option value="avi">AVI</option>
-                <option value="mov">MOV</option>
-            </select>
-            <label for="resolution">Resolution:</label>
-            <select name="resolution" id="resolution">
-                <option value="1080p">1080p</option>
-                <option value="720p">720p</option>
-                <option value="480p">480p</option>
-            </select>
-            <button type="submit">Convert Video</button>
-        </form>
-
-    </div>
+        <div class="conversion-container">
+            <h3>Convert to:</h3>
+            <form action="/process" method="POST">
+                <input type="hidden" name="video" value="<%= video ? video : '' %>">
+                <label for="format">Format:</label>
+                <select name="format" id="format">
+                    <option value="mp4">MP4</option>
+                    <option value="avi">AVI</option>
+                    <option value="mov">MOV</option>
+                </select>
+                <label for="resolution">Resolution:</label>
+                <select name="resolution" id="resolution">
+                    <option value="1080p">1080p</option>
+                    <option value="720p">720p</option>
+                    <option value="480p">480p</option>
+                </select>
+                <button type="submit">Convert Video</button>
+            </form>
+        </div>
     </div>
 
     <script>
@@ -165,7 +156,6 @@
                     } catch (error) {
                         clearInterval(simulateProgressInterval);
                         console.error("Failed to parse JSON response:", error);
-                        console.log("Response was:", xhr.responseText);
                         alert('Failed to upload video. Please try again.');
                     }
                 } else {
@@ -188,32 +178,6 @@
         });
     </script>
 
-    <h2>Your Uploaded Videos</h2>
-    <ul>
-        <% if (videos && videos.length> 0) { %>
-            <% videos.forEach(function(video) { %>
-                <li>
-                    <h4>
-                        <%= video.filename %>
-                    </h4>
-
-                    <!-- Preview button -->
-                    <form action="/preview-video" method="POST" style="display:inline;">
-                        <input type="hidden" name="videoUrl" value="<%= video.url %>">
-                        <button type="submit">Preview</button>
-                    </form>
-
-                    <!-- Delete button -->
-                    <form action="/delete-video" method="POST" style="display:inline;">
-                        <input type="hidden" name="filename" value="<%= video.filename %>">
-                        <button type="submit">Delete</button>
-                    </form>
-                </li>
-                <% }); %>
-                    <% } else { %>
-                        <p>No videos uploaded yet.</p>
-                        <% } %>
-    </ul>
     <h2>Your Uploaded Videos</h2>
     <ul>
         <% if (videos && videos.length> 0) { %>
@@ -300,56 +264,7 @@
                         alert("Error deleting video.");
                     });
             }
-            // Fetch and display videos
-            fetch('/api/videos')
-                .then(response => response.json())
-                .then(videos => {
-                    const videoList = document.getElementById('video-list');
-                    videos.forEach(video => {
-                        const li = document.createElement('li');
-                        li.textContent = video.filename;
-                        videoList.appendChild(li);
-
-                        // Add delete button
-                        const deleteButton = document.createElement('button');
-                        deleteButton.textContent = 'Delete';
-                        deleteButton.onclick = () => deleteVideo(video._id);  // Using _id
-                        li.appendChild(deleteButton);
-                    });
-                });
-
-            // Function to load the video into the main preview area
-            function previewVideo(videoUrl) {
-                const videoPlayer = document.getElementById('videoPlayer');
-                const videoSource = document.getElementById('videoSource');
-                videoSource.src = videoUrl;
-                videoPlayer.load();  // Reload the video player
-            }
-
-            // Function to handle video deletion
-            function deleteVideo(filename) {
-                if (confirm("Are you sure you want to delete this video?")) {
-                    fetch(`/delete-video/${filename}`, { method: 'DELETE' })
-                        .then(response => {
-                            if (response.ok) {
-                                alert("Video deleted successfully.");
-                                location.reload();  // Reload the page to update the video list
-                            } else {
-                                alert("Error deleting video.");
-                            }
-                        })
-                        .catch(error => {
-                            console.error('Error deleting video:', error);
-                            alert("Error deleting video.");
-                        });
-                }
-            }
-
-            function checkStatus(id) {
-                fetch(`/api/videos/${id}/status`)  // Using _id
-                    .then(response => response.json())
-                    .then(data => alert(`Status: ${data.status}`));
-            }
+        }
     </script>
 
     <footer class="footer">
