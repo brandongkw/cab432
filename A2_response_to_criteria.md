@@ -129,11 +129,11 @@ Core criteria
 
 ### Custom security groups
 
-- **Security group names:**
-- **Services/instances using security groups:**
+- **Security group names:** sg-044f0e4d7f4738966 - Group36-A2
+- **Services/instances using security groups:** ec2-apsoutheast-2-Brandon
 - **Video timestamp:**
 - **Relevant files:**
-    -
+    - 
 
 ### Parameter store
 
