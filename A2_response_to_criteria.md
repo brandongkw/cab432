@@ -31,7 +31,7 @@ Core criteria
 - **Why is this service suited to this data?:** S3 is ideal for storing large files like video due to its scalability and durability. It is also cost-effective for blob storage.
 - **Why is are the other services used not suitable for this data?:** DynamoDB and RDS are not optimized for large unstructured data storage like videos.
 - **Bucket/instance/table name:** n11381345-assessment-2
-- **Video timestamp:**
+- **Video timestamp:**  00:09
 - **Relevant files:**
     - index.js
     - index.ejs
@@ -43,7 +43,7 @@ Core criteria
 - **Why is this service suited to this data?:** DynamoDB is a NoSQL database optimized for fast reads and writes, making it efficient for storing metadata and handling high concurrency.
 - **Why is are the other services used not suitable for this data?:** S3 does not support structured metadata storage and searching as effectively as DynamoDB, and RDS can be overkill for such lightweight data.
 - **Bucket/instance/table name:** Group36-A2
-- **Video timestamp:**
+- **Video timestamp:** 00:14
 - **Relevant files:**
     - index.js
 
@@ -61,7 +61,7 @@ Core criteria
 ### S3 Pre-signed URLs
 
 - **S3 Bucket names:** n11381345-assessment-2
-- **Video timestamp:**
+- **Video timestamp:** 00:48
 - **Relevant files:**
     - index.js
 
@@ -94,7 +94,7 @@ Core criteria
 
 - **User pool name:** ap-southeast-2_esr3bu7ws
 - **How are authentication tokens handled by the client?:** Tokens are stored in secure HTTP-only cookies after successful authentication with Cognito.
-- **Video timestamp:**
+- **Video timestamp:** 00:58
 - **Relevant files:**
     - login.ejs
     - register.ejs
@@ -117,21 +117,21 @@ Core criteria
 ### Cognito groups
 
 - **How are groups used to set permissions?:** Admin users can manage videos (e.g., delete videos); regular users can only upload and view their own videos.
-- **Video timestamp:**
+- **Video timestamp:** 01:15
 - **Relevant files:**
     - index.js
 
 ### Core - DNS with Route53
 
-- **Subdomain**:  http://team-36.cab432.com:3000/
-- **Video timestamp:**
-
+- **Subdomain**:  http://team-36.cab432.com:8080/
+- **Video timestamp:** 01:45
+ 
 
 ### Custom security groups
 
 - **Security group names:** sg-044f0e4d7f4738966 - Group36-A2
 - **Services/instances using security groups:** ec2-apsoutheast-2-Brandon
-- **Video timestamp:**
+- **Video timestamp:** 02:09
 - **Relevant files:**
     - 
 
