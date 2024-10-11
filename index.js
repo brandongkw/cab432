@@ -11,6 +11,7 @@ const flash = require('connect-flash');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const WebSocket = require('ws');
+const qutUsername = `n11381345@qut.edu.au`;
 const fs = require('fs');
 
 // AWS SDK Imports
@@ -43,7 +44,6 @@ AWS.config.update({
 
 const app = express();
 const port = process.env.PORT || 3000;
-const qutUsername = 'n11381345@qut.edu.au';  // Hardcoded username
 
 // Set the path to the ffmpeg binary
 ffmpeg.setFfmpegPath(ffmpegPath);
@@ -260,12 +260,64 @@ app.post('/upload', isAuthenticated, (req, res) => {
             res.render('index', { video: req.file.originalname, msg: 'Video uploaded successfully', preview: preSignedUrl, user: req.user, videos: videosWithUrls });
         } catch (error) {
             console.error('Error uploading video or saving metadata:', error);
-            res.status(500).json({ message: 'Error uploading video', error });
+            res.render('index', { video: null, preview: null, msg: 'Error uploading video', user: req.user });
         }
     });
 });
 
-// Process Video Route
+// Get uploaded videos for the user
+// When fetching videos, generates the pre-signed URL to fetch the video from S3
+app.get('/videos', isAuthenticated, async (req, res) => {
+
+    try {
+        // Fetch video metadata from DynamoDB
+        const dynamoParams = {
+            TableName: process.env.DYNAMODB_TABLE_NAME,
+            KeyConditionExpression: '#partitionKey = :username',
+            ExpressionAttributeNames: {
+                '#partitionKey': 'qut-username',
+            },
+            ExpressionAttributeValues: {
+                ':username': qutUsername,
+            },
+        };
+
+        const dynamoData = await docClient.send(new QueryCommand(dynamoParams));
+
+        // Generate pre-signed URLs for each video
+        const videosWithUrls = await Promise.all(
+            dynamoData.Items.map(async (video) => {
+                const url = await generatePreSignedUrl(video.filename);
+                return { filename: video.filename, url };
+            })
+        );
+
+        // Render the page with videos list
+        res.render('index', {
+            videos: videosWithUrls,
+            user: req.user,
+            preview: null,  // No initial video selected for preview
+            msg: '',
+            video: ''
+        });
+
+    } catch (error) {
+        console.error('Error fetching videos from DynamoDB:', error);
+        res.status(500).send('Error fetching videos');
+    }
+});
+
+// Function to generate pre-signed URL for video playback
+async function generatePreSignedUrl(filename) {
+    const s3Params = {
+        Bucket: process.env.S3_BUCKET_NAME,
+        Key: `videos/${filename}`,
+    };
+    const command = new GetObjectCommand(s3Params);
+    return await getSignedUrl(s3, command, { expiresIn: 3600 });  // 1 hour URL
+}
+
+// Process video route
 app.post('/process', isAuthenticated, async (req, res) => {
     const { format, resolution, video } = req.body;
     if (!format || !resolution || !video) return res.status(400).send('Format, resolution, or video file not specified.');
