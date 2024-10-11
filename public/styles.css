@@ -1,8 +1,10 @@
 /* General body styling */
 body {
     font-family: 'Roboto', sans-serif;
-    background-color: #f9f0e8; /* Soft warm background */
-    color: #3d3d3d; /* Darker text for readability */
+    background-color: #f9f0e8;
+    /* Soft warm background */
+    color: #3d3d3d;
+    /* Darker text for readability */
     margin: 0;
     padding: 0;
     padding-top: 70px;
@@ -10,7 +12,8 @@ body {
 
 /* Header Styling */
 h1 {
-    color: #ff6b6b; /* Warm sunset color */
+    color: #ff6b6b;
+    /* Warm sunset color */
     font-size: 3em;
     margin-top: 20px;
 }
@@ -22,7 +25,8 @@ h1 {
     grid-template-rows: auto auto;
     grid-gap: 20px;
     padding: 20px 40px;
-    padding-top: 100px; /* Adjust the top padding to make space for the fixed navbar */
+    padding-top: 100px;
+    /* Adjust the top padding to make space for the fixed navbar */
     max-width: 1200px;
     margin: 0 auto;
 }
@@ -34,7 +38,8 @@ form {
     background: #ffffff;
     border-radius: 10px;
     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    max-width: 100%; /* Ensure form doesn't take up too much space */
+    max-width: 100%;
+    /* Ensure form doesn't take up too much space */
 }
 
 /* File Upload and Button Styling */
@@ -79,7 +84,8 @@ input[type="file"] {
 }
 
 /* Custom file upload button */
-.custom-file-upload, button {
+.custom-file-upload,
+button {
     display: inline-block;
     padding: 10px 20px;
     background-color: #FF7F7F;
@@ -203,7 +209,10 @@ video {
 }
 
 /* Global adjustments for padding and margin to bring elements closer */
-h2, h3, .file-upload, .conversion-container {
+h2,
+h3,
+.file-upload,
+.conversion-container {
     margin-bottom: 15px;
 }
 
@@ -298,4 +307,21 @@ footer {
     text-align: center;
     padding: 10px 0;
     width: 100%;
+}
+
+.progress-bar {
+    width: 100%;
+    height: 10px;
+    background-color: #f3f3f3;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-top: 10px;
+}
+
+#progress-bar-fill {
+    width: 0%;
+    height: 100%;
+    background-color: green;
+    transition: width 0.4s ease;
 }
