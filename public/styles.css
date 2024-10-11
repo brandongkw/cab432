@@ -246,6 +246,7 @@ h3,
 }
 
 .auth-container input[type="text"],
+.auth-container input[type="email"],
 .auth-container input[type="password"] {
     width: 100%;
     padding: 10px;
