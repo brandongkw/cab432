@@ -83,9 +83,8 @@ input[type="file"] {
     background-color: #ff5a4c;
 }
 
-/* Custom file upload button */
 .custom-file-upload,
-button {
+button[type="submit"] {
     display: inline-block;
     padding: 10px 20px;
     background-color: #FF7F7F;
@@ -94,16 +93,43 @@ button {
     cursor: pointer;
     font-size: 16px;
     text-align: center;
-    margin-right: 10px;
     width: 100%;
-    max-width: 150px;
+    max-width: 200px;
+    box-sizing: border-box;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    /* Adds space between button and file name */
+}
+
+/* Styling for displayed filename */
+#file-chosen {
+    margin-top: 10px;
+    /* Extra spacing between Choose File button and filename */
+    margin-bottom: 10px;
+    /* Adds space between filename and Upload button */
+    font-style: italic;
+    color: #555;
+    text-align: center;
+    display: block;
+}
+
+#uploadStatus {
+    margin-top: 10px;
+    font-size: 14px;
+    color: #333;
+    text-align: center;
+}
+
+button[type="submit"] {
+    width: 100%;
+    max-width: 200px;
 }
 
 .file-upload-wrapper {
     display: flex;
     flex-direction: column;
     align-items: center;
-    margin-bottom: 20px;
+    gap: 10px;
 }
 
 /* Styling the displayed file name */
@@ -285,22 +311,6 @@ h3,
     text-decoration: underline;
 }
 
-.progress-bar {
-    width: 100%;
-    background-color: #f3f3f3;
-    border-radius: 25px;
-    margin: 20px 0;
-    height: 25px;
-}
-
-.progress-bar-fill {
-    height: 100%;
-    width: 0;
-    background-color: #4caf50;
-    border-radius: 25px;
-    transition: width 0.5s;
-}
-
 /* Footer Styles */
 footer {
     background-color: #f76c6c;
@@ -317,12 +327,11 @@ footer {
     border: 1px solid #ccc;
     border-radius: 5px;
     overflow: hidden;
-    margin-top: 10px;
 }
 
 #progress-bar-fill {
     width: 0%;
     height: 100%;
-    background-color: green;
+    background-color: #4caf50;
     transition: width 0.4s ease;
 }
