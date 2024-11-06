@@ -49,6 +49,7 @@ app.use((err, req, res, next) => {
 });
 
 app.post('/process', async (req, res) => {
+    console.log('Received request for video processing:', req.body);
     const { format, resolution, video } = req.body;
     const localVideoPath = `./videos/${video}`;
     const outputFilePath = `./videos/processed-${Date.now()}.${format}`;
@@ -60,6 +61,9 @@ app.post('/process', async (req, res) => {
             format,
             resolution,
         });
+
+        // Additional logging within the processing flow
+        console.log(`Video processing started for ${video} in ${format} format at ${resolution} resolution.`);
 
         const getCommand = new GetObjectCommand({ Bucket: process.env.S3_BUCKET_NAME, Key: `videos/${video}` });
         const data = await s3.send(getCommand);
@@ -121,6 +125,13 @@ app.post('/process', async (req, res) => {
                 .run();
         });
 
+        // Log on successful completion
+        await sendSQSMessage({
+            status: 'Processing complete',
+            video,
+        });
+        console.log(`Video processing completed for ${video}.`);
+
         stream.on('error', (err) => {
             console.error('Error writing video file:', err);
             res.status(500).send('Error writing video file');
@@ -141,12 +152,13 @@ function broadcastProgress(progress) {
 
 async function sendSQSMessage(message) {
     try {
+        console.log('Preparing to send SQS message:', message);  // Log message content before sending
         const command = new SendMessageCommand({
             QueueUrl: queueUrl,
             MessageBody: JSON.stringify(message),
         });
         const response = await sqs.send(command);
-        console.log('SQS Message Sent:', response.MessageId);
+        console.log('SQS Message Sent:', response.MessageId, 'with content:', message);  // Log after successful send
     } catch (err) {
         console.error('Error sending SQS message:', err);
     }
