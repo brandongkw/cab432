@@ -12,7 +12,7 @@
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.658.1",
     "@aws-sdk/client-s3": "^3.667.0",
-    "@aws-sdk/client-sqs": "^3.679.0",
+    "@aws-sdk/client-sqs": "^3.687.0",
     "@aws-sdk/lib-dynamodb": "^3.667.0",
     "@aws-sdk/s3-request-presigner": "^3.667.0",
     "aws-jwt-verify": "^4.0.1",
