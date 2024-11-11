@@ -57,7 +57,8 @@
         <div class="conversion-container">
             <h3>Convert to:</h3>
             <form action="http://localhost:4000/process" method="POST">
-                <input type="hidden" name="video" value="<%= video ? video : '' %>">
+                <input type="hidden" name="selectedVideo" id="selectedVideo">
+                <input type="hidden" name="userId" value="<%= user['cognito:username'] %>"> <!-- Pass userId here -->
                 <label for="format">Format:</label>
                 <select name="format" id="format">
                     <option value="mp4">MP4</option>
@@ -73,6 +74,30 @@
                 <button type="submit">Convert Video</button>
             </form>
         </div>
+    </div>
+
+    <div class="video-gallery">
+        <h2>Your Uploaded Videos:</h2>
+        <% if (videos && videos.length> 0) { %>
+            <ul class="video-list">
+                <% videos.forEach((video)=> { %>
+                    <li class="video-item">
+                        <h3>
+                            <%= video.filename %>
+                        </h3>
+                        <video controls width="250">
+                            <source src="<%= video.url %>" type="video/mp4">
+                            Your browser does not support the video tag.
+                        </video>
+                        <button onclick="selectVideo('<%= video.filename %>', '<%= video.url %>')">Select for
+                            Conversion</button>
+                        <button onclick="deleteVideo('<%= video.filename %>', '<%= video.videoId %>')">Delete</button>
+                    </li>
+                    <% }); %>
+            </ul>
+            <% } else { %>
+                <p>No videos uploaded yet.</p>
+                <% } %>
     </div>
 
     <script>
@@ -110,6 +135,7 @@
                     // Set the video source to the preview URL or reset if not available
                     videoSource.src = result.preview || '';
                     videoPlayer.load(); // Reload the video player with the new source
+                    window.location.reload();
                 } else {
                     uploadStatus.textContent = result.message || 'Error uploading video';
                 }
@@ -168,6 +194,40 @@
                 console.log('Max reconnect attempts reached. Could not reconnect to WebSocket.');
                 alert('Unable to reconnect to the server. Please try again later.');
             }
+        }
+
+        function selectVideo(filename, videoUrl) {
+            document.getElementById('selectedVideo').value = filename;
+            // alert(`Selected video: ${filename} for conversion`);
+
+            // Update the preview video
+            const videoPlayer = document.getElementById('videoPlayer');
+            const videoSource = document.getElementById('videoSource');
+            videoSource.src = videoUrl;
+            videoPlayer.load();  // Reload the video player with the new source
+        }
+
+        function deleteVideo(filename, videoId) {
+            console.log("Deleting video with filename:", filename, "and videoId:", videoId); // Log to confirm values
+            fetch('/delete-video', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ filename, videoId })
+            })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.message === 'Video deleted successfully') {
+                        alert('Video deleted');
+                        window.location.reload(); // Refresh the page to update the video list
+                    } else {
+                        alert('Error deleting video');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
         }
 
         // Initialize WebSocket connection on page load
