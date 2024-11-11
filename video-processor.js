@@ -50,22 +50,29 @@ app.use((err, req, res, next) => {
 
 app.post('/process', async (req, res) => {
     console.log('Received request for video processing:', req.body);
-    const { format, resolution, video } = req.body;
-    const localVideoPath = `./videos/${video}`;
+    const { format, resolution, selectedVideo, userId } = req.body; // Get userId from the request body
+    const localVideoPath = `./videos/${selectedVideo}`;
     const outputFilePath = `./videos/processed-${Date.now()}.${format}`;
+
+    if (!selectedVideo || !userId) {
+        return res.status(400).send('No video or user ID specified for conversion.');
+    }
 
     try {
         await sendSQSMessage({
             status: 'Processing started',
-            video,
+            video: selectedVideo,
             format,
             resolution,
         });
 
-        // Additional logging within the processing flow
-        console.log(`Video processing started for ${video} in ${format} format at ${resolution} resolution.`);
+        console.log(`Video processing started for ${selectedVideo} in ${format} format at ${resolution} resolution.`);
 
-        const getCommand = new GetObjectCommand({ Bucket: process.env.S3_BUCKET_NAME, Key: `videos/${video}` });
+        // Update S3 Key with userId to locate the correct video file
+        const getCommand = new GetObjectCommand({
+            Bucket: process.env.S3_BUCKET_NAME,
+            Key: `videos/${userId}/${selectedVideo}` // Use userId to build the correct path
+        });
         const data = await s3.send(getCommand);
 
         const stream = fs.createWriteStream(localVideoPath);
@@ -88,7 +95,7 @@ app.post('/process', async (req, res) => {
 
                     await sendSQSMessage({
                         status: 'Processing complete',
-                        video,
+                        video: selectedVideo,
                         outputFilePath,
                     });
 
@@ -115,7 +122,7 @@ app.post('/process', async (req, res) => {
 
                     await sendSQSMessage({
                         status: 'Processing error',
-                        video,
+                        video: selectedVideo,
                         error: err.message,
                     });
 
@@ -124,13 +131,6 @@ app.post('/process', async (req, res) => {
                 })
                 .run();
         });
-
-        // Log on successful completion
-        await sendSQSMessage({
-            status: 'Processing complete',
-            video,
-        });
-        console.log(`Video processing completed for ${video}.`);
 
         stream.on('error', (err) => {
             console.error('Error writing video file:', err);

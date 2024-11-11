@@ -7,9 +7,9 @@ const cookieParser = require('cookie-parser');
 const path = require('path');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
-const { S3Client, PutObjectCommand, GetObjectCommand } = require("@aws-sdk/client-s3"); // Ensure GetObjectCommand is included
+const { S3Client, PutObjectCommand, GetObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3"); // Ensure GetObjectCommand is included
 const { DynamoDBClient } = require("@aws-sdk/client-dynamodb");
-const { DynamoDBDocumentClient, PutCommand, QueryCommand } = require("@aws-sdk/lib-dynamodb");
+const { DynamoDBDocumentClient, PutCommand, QueryCommand, DeleteCommand } = require("@aws-sdk/lib-dynamodb");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const AWS = require('aws-sdk');
 const CognitoIdentityServiceProvider = new AWS.CognitoIdentityServiceProvider();
@@ -39,6 +39,8 @@ app.use(session({
     saveUninitialized: true,
     cookie: { secure: process.env.NODE_ENV === 'production' },
 }));
+app.use(express.json());
+
 
 // Global error handler
 app.use((err, req, res, next) => {
@@ -170,6 +172,8 @@ app.get('/logout', (req, res) => {
     res.redirect('/login');
 });
 
+
+
 // Video Upload Route
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -183,6 +187,8 @@ const upload = multer({
     }
 }).single('videoFile');
 
+const { v4: uuidv4 } = require('uuid');
+
 app.post('/upload', isAuthenticated, (req, res) => {
     upload(req, res, async (err) => {
         if (err) {
@@ -194,10 +200,13 @@ app.post('/upload', isAuthenticated, (req, res) => {
         }
 
         try {
+            // Generate a unique filename to avoid collisions in S3
+            const uniqueFilename = `${uuidv4()}_${req.file.originalname}`;
+
             // S3 Upload logic with error handling
             const s3Params = {
                 Bucket: process.env.S3_BUCKET_NAME,
-                Key: `videos/${req.file.originalname}`,
+                Key: `videos/${req.user['cognito:username']}/${uniqueFilename}`, // Store under user's unique folder
                 Body: req.file.buffer,
                 ContentType: req.file.mimetype,
             };
@@ -205,18 +214,21 @@ app.post('/upload', isAuthenticated, (req, res) => {
             await s3.send(new PutObjectCommand(s3Params));
 
             // Generate pre-signed URL for playback
-            const preSignedUrl = await generatePreSignedUrl(req.file.originalname);
+            const preSignedUrl = await generatePreSignedUrl(`${req.user['cognito:username']}/${uniqueFilename}`);
 
-            // DynamoDB logic
+            // DynamoDB logic - Store the unique filename as 'filename' in DynamoDB
             const command = new PutCommand({
                 TableName: process.env.DYNAMODB_TABLE_NAME,
                 Item: {
-                    'qut-username': qutUsername,  // Ensure this aligns with your user data structure
-                    videoId: Date.now().toString(),
-                    filename: req.file.originalname,
-                    uploadTime: new Date().toISOString(),
+                    'qut-username': qutUsername,
+                    'videoId': uuidv4(),  // Generate a unique videoId
+                    'userId': req.user['cognito:username'],
+                    'filename': uniqueFilename,  // Save the unique filename
+                    'uploadTime': new Date().toISOString(),
+                    'videoName': req.file.originalname,  // Store the original file name for reference
                 },
             });
+
             await dynamoDBClient.send(command);
 
             // Return JSON response
@@ -251,7 +263,7 @@ app.get('/videos', isAuthenticated, async (req, res) => {
         if (data.Items && data.Items.length > 0) {
             videosWithUrls = await Promise.all(
                 data.Items.map(async (video) => {
-                    const url = await generatePreSignedUrl(video.filename);
+                    const url = await generatePreSignedUrl(`${user['cognito:username']}/${video.filename}`);
                     return { ...video, url };  // Attach the signed URL to the video object
                 })
             );
@@ -286,7 +298,7 @@ app.post('/preview-video', isAuthenticated, (req, res) => {
             .then(async (dynamoData) => {
                 const videosWithUrls = await Promise.all(
                     dynamoData.Items.map(async (video) => {
-                        const url = await generatePreSignedUrl(video.filename);
+                        const url = await generatePreSignedUrl(`${user['cognito:username']}/${video.filename}`);
                         return { filename: video.filename, url };
                     })
                 );
@@ -312,13 +324,20 @@ app.post('/preview-video', isAuthenticated, (req, res) => {
 
 // Delete video from both S3 and DynamoDB
 app.post('/delete-video', isAuthenticated, async (req, res) => {
-    const { filename } = req.body;
+    const { filename, videoId } = req.body;
+
+    // Log to confirm the received values
+    console.log("Received delete request with filename:", filename, "and videoId:", videoId);
+
+    if (!filename || !videoId) {
+        return res.status(400).json({ message: 'Filename or videoId missing from request' });
+    }
 
     try {
         // Delete from S3
         const s3Params = {
             Bucket: process.env.S3_BUCKET_NAME,
-            Key: `videos/${filename}`,
+            Key: `videos/${req.user['cognito:username']}/${filename}`, // Ensure correct S3 key
         };
         await s3.send(new DeleteObjectCommand(s3Params));
 
@@ -326,17 +345,16 @@ app.post('/delete-video', isAuthenticated, async (req, res) => {
         const dynamoParams = {
             TableName: process.env.DYNAMODB_TABLE_NAME,
             Key: {
-                'qut-username': qutUsername,  // Ensure this aligns with your user data structure
-                'filename': filename
+                'qut-username': qutUsername,  // Partition key in DynamoDB
+                'videoId': videoId            // Sort key in DynamoDB
             }
         };
         await dynamoDBClient.send(new DeleteCommand(dynamoParams));
 
-        // Redirect only after successful deletion from both S3 and DynamoDB
-        res.redirect('/videos');
+        res.status(200).json({ message: 'Video deleted successfully' });
     } catch (error) {
         console.error('Error deleting video:', error);
-        res.status(500).send('Error deleting video');
+        res.status(500).json({ message: 'Error deleting video' });
     }
 });
 
@@ -356,13 +374,19 @@ async function getUploadedVideos(user) {
             ExpressionAttributeNames: {
                 '#partitionKey': 'qut-username',
             },
-            ExpressionAttributeValues: { ':username': qutUsername },
+            ExpressionAttributeValues: {
+                ':username': qutUsername,
+            },
         };
+
         const data = await docClient.send(new QueryCommand(params));
 
-        if (data.Items.length > 0) {
-            return await Promise.all(data.Items.map(async (video) => {
-                const url = await generatePreSignedUrl(video.filename);
+        // Filter results by userId after querying by qut-username
+        const videosForUser = data.Items.filter(video => video.userId === user['cognito:username']);
+
+        if (videosForUser.length > 0) {
+            return await Promise.all(videosForUser.map(async (video) => {
+                const url = await generatePreSignedUrl(`${user['cognito:username']}/${video.filename}`);
                 return { ...video, url };
             }));
         }
@@ -374,15 +398,16 @@ async function getUploadedVideos(user) {
 }
 
 // Function to generate pre-signed URL
-async function generatePreSignedUrl(filename) {
+async function generatePreSignedUrl(filenameWithPath) {
     const params = {
         Bucket: process.env.S3_BUCKET_NAME,
-        Key: `videos/${filename}`,
+        Key: `videos/${filenameWithPath}`,  // Use full path passed to the function
     };
     const command = new GetObjectCommand(params);
     const signedUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });  // URL expires in 1 hour
     return signedUrl;
 }
+
 
 // Start the server
 app.listen(port, () => console.log(`Server running at http://localhost:${port}`));
