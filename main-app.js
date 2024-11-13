@@ -16,7 +16,7 @@ const CognitoIdentityServiceProvider = new AWS.CognitoIdentityServiceProvider();
 const { CognitoJwtVerifier } = require('aws-jwt-verify');
 const app = express();
 const qutUsername = 'n11381345@qut.edu.au';
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 443;
 
 const s3 = new S3Client({ region: process.env.AWS_REGION });
 const dynamoDBClient = DynamoDBDocumentClient.from(new DynamoDBClient({ region: process.env.AWS_REGION }));
