@@ -1,19 +1,25 @@
 # Use a Node.js image as the base
 FROM node:16
 
+# Set NODE_ENV to production (optional)
+ENV NODE_ENV=production
+
 # Create and set the working directory
 WORKDIR /app
+
+# In Dockerfile.web-client
+COPY views /app/views
 
 # Copy package.json and package-lock.json files
 COPY package*.json ./
 
-# Install dependencies
+# Install dependencies (production only if NODE_ENV=production)
 RUN npm install
 
 # Copy the rest of the application files
 COPY . .
 
-# Expose the port your app runs on
+# Expose the port that will be used for HTTPS (adjust as necessary based on environment variables)
 EXPOSE 3000
 
 # Define the command to run the application

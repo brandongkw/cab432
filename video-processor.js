@@ -9,7 +9,7 @@ const path = require('path');
 const http = require('http');
 const WebSocket = require('ws');
 const app = express();
-const port = process.env.PORT || 80;
+const port = process.env.PORT || 4000;
 
 const s3 = new S3Client({ region: process.env.AWS_REGION });
 const sqs = new SQSClient({ region: process.env.AWS_REGION });
