@@ -56,7 +56,8 @@
 
         <div class="conversion-container">
             <h3>Convert to:</h3>
-            <form action="http://group36-web-client-api-alb-1213625636.ap-southeast-2.elb.amazonaws.com/process"
+            <form action="https://group36-web-client-api-alb-1213625636.ap-southeast-2.elb.amazonaws.com/process"
+                method="POST">
                 method="POST">
                 <input type="hidden" name="selectedVideo" id="selectedVideo">
                 <input type="hidden" name="userId" value="<%= user['cognito:username'] %>"> <!-- Pass userId here -->
@@ -147,7 +148,7 @@
         });
 
         function connectWebSocket() {
-            socket = new WebSocket('ws://group36-web-client-api-alb-1213625636.ap-southeast-2.elb.amazonaws.com');  // Connect to the video processor WebSocket
+            socket = new WebSocket('wss://group36-web-client-api-alb-1213625636.ap-southeast-2.elb.amazonaws.com');
 
             socket.onopen = () => {
                 console.log('WebSocket connected');
