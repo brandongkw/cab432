@@ -48,7 +48,7 @@ app.use((err, req, res, next) => {
     res.status(500).send('Something went wrong. Please try again later.');
 });
 
-app.post('/vs/process', async (req, res) => {
+app.post('/process', async (req, res) => {
     console.log('Received request for video processing:', req.body);
     const { format, resolution, selectedVideo, userId } = req.body; // Get userId from the request body
     const localVideoPath = `./videos/${selectedVideo}`;
@@ -143,7 +143,7 @@ app.post('/vs/process', async (req, res) => {
 });
 
 // Health-check route
-app.get('/vs/health-check', (req, res) => {
+app.get('/health-check', (req, res) => {
     res.status(200).send('Server is healthy');
 });
 
