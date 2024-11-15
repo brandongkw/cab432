@@ -142,6 +142,11 @@ app.post('/process', async (req, res) => {
     }
 });
 
+// Health-check route
+app.get('/health-check', (req, res) => {
+    res.status(200).send('Server is healthy');
+});
+
 function broadcastProgress(progress) {
     for (let clientId in clients) {
         if (clients[clientId].readyState === WebSocket.OPEN) {
