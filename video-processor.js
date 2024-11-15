@@ -143,7 +143,7 @@ app.post('/vs/process', async (req, res) => {
 });
 
 // Health-check route
-app.get('/health-check', (req, res) => {
+app.get('/vs/health-check', (req, res) => {
     res.status(200).send('Server is healthy');
 });
 
